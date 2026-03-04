@@ -15,7 +15,7 @@ def regression_page(page: ft.Page) -> ft.Control:
     """回帰分析タブのUIを構築する"""
     print("DEBUG: 回帰分析ページ構築開始")
 
-    df: pd.DataFrame | None = page.session.get("df")
+    df: pd.DataFrame | None = page.session.store.get("df")
     if df is None or df.empty:
         return ft.Text("先にデータ閲覧タブでデータを読み込んでください。", color=ft.Colors.RED_700)
 

@@ -36,7 +36,7 @@ def forecast_page(page: ft.Page) -> ft.Control:
                     spacing=12,
                 ),
                 padding=40,
-                alignment=ft.alignment.center,
+                alignment=ft.Alignment(0, 0),
             ),
         ],
         spacing=10,

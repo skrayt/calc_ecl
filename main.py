@@ -27,14 +27,16 @@ def main(page: ft.Page):
     page.window.min_width = 800
     page.window.min_height = 600
 
-    page.scroll = ft.ScrollMode.AUTO
-
     # タブの本体表示領域
-    body = ft.Column(expand=True, scroll=ft.ScrollMode.AUTO)
+    body = ft.Column(scroll=ft.ScrollMode.AUTO, expand=True)
 
     def on_tab_change(e):
         """タブ切替時にページを動的ロードする"""
-        selected = e.control.selected_index
+        # TabBar.on_click: e.data にクリック位置(int文字列)が入る
+        try:
+            selected = int(e.data) if e.data else 0
+        except (ValueError, TypeError):
+            selected = 0
         print(f"DEBUG: タブ切替 → index={selected}")
         body.controls.clear()
 
@@ -61,27 +63,37 @@ def main(page: ft.Page):
 
         page.update()
 
-    # タブメニュー
-    tabs = ft.Tabs(
-        selected_index=0,
-        on_change=on_tab_change,
+    # TabBar (Tabsの中に配置する必要がある)
+    tab_bar = ft.TabBar(
         tabs=[
-            ft.Tab(text="① データ閲覧"),
-            ft.Tab(text="② 相関分析"),
-            ft.Tab(text="③ 回帰分析"),
-            ft.Tab(text="④ モデル選択"),
-            ft.Tab(text="⑤ 動的回帰"),
-            ft.Tab(text="⑥ ARIMA"),
-            ft.Tab(text="⑦ 将来シナリオ"),
+            ft.Tab(label="① データ閲覧"),
+            ft.Tab(label="② 相関分析"),
+            ft.Tab(label="③ 回帰分析"),
+            ft.Tab(label="④ モデル選択"),
+            ft.Tab(label="⑤ 動的回帰"),
+            ft.Tab(label="⑥ ARIMA"),
+            ft.Tab(label="⑦ 将来シナリオ"),
         ],
+        on_click=on_tab_change,
     )
 
-    # 初期ページ
+    # 初期ページをロード
     body.controls.append(data_view_page(page))
 
-    page.add(tabs, body)
+    # Tabs コントローラー（TabBarを内包する必要がある）
+    tabs_ctrl = ft.Tabs(
+        length=7,
+        selected_index=0,
+        on_change=on_tab_change,
+        content=ft.Column(
+            controls=[tab_bar, body],
+            expand=True,
+        ),
+    )
+
+    page.add(tabs_ctrl)
     print("DEBUG: 初期ページ表示完了")
 
 
 if __name__ == "__main__":
-    ft.app(target=main)
+    ft.run(main, view=ft.AppView.WEB_BROWSER, port=8550)

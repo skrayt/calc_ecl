@@ -57,7 +57,7 @@ class VariableSelector:
             label="目的変数",
             options=[ft.dropdown.Option(c) for c in self.columns],
             value=initial_target or (self.columns[0] if self.columns else None),
-            on_change=self._on_target_change,
+            on_select=self._on_target_change,
             width=300,
         )
 
@@ -95,7 +95,7 @@ class VariableSelector:
                         for k, v in TRANSFORM_METHODS.items()
                     ],
                     value=self._transforms.get(col, "none"),
-                    on_change=lambda e, c=col: self._on_transform_change(e, c),
+                    on_select=lambda e, c=col: self._on_transform_change(e, c),
                     width=200,
                     dense=True,
                     text_size=12,

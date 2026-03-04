@@ -20,7 +20,7 @@ def correlation_page(page: ft.Page) -> ft.Control:
     print("DEBUG: 相関分析ページ構築開始")
 
     # 共有データを取得
-    df: pd.DataFrame | None = page.session.get("df")
+    df: pd.DataFrame | None = page.session.store.get("df")
     if df is None or df.empty:
         return ft.Text("先にデータ閲覧タブでデータを読み込んでください。", color=ft.Colors.RED_700)
 

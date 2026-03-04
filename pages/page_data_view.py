@@ -31,12 +31,12 @@ def data_view_page(page: ft.Page) -> ft.Control:
     dataset_dropdown = ft.Dropdown(
         label="データセット",
         width=400,
-        on_change=lambda e: on_dataset_change(e),
+        on_select=lambda e: on_dataset_change(e),
     )
     freq_dropdown = ft.Dropdown(
         label="frequency",
         width=200,
-        on_change=lambda e: on_freq_change(e),
+        on_select=lambda e: on_freq_change(e),
     )
     status_text = ft.Text("データセットを選択してください", size=12)
     data_table_container = ft.Column(scroll=ft.ScrollMode.AUTO)
@@ -139,9 +139,10 @@ def data_view_page(page: ft.Page) -> ft.Control:
 
         threading.Thread(target=run, daemon=True).start()
 
-    def on_file_result(e: ft.FilePickerResultEvent):
-        if e.files:
-            file_path = e.files[0].path
+    async def pick_csv(e):
+        files = await file_picker.pick_files(allow_multiple=False, allowed_extensions=["csv"])
+        if files:
+            file_path = files[0].path
             print(f"DEBUG: ファイル選択: {file_path}")
             progress_bar.visible = True
             progress_bar.value = 0
@@ -149,8 +150,7 @@ def data_view_page(page: ft.Page) -> ft.Control:
             page.update()
             start_import_thread(file_path)
 
-    file_picker = ft.FilePicker(on_result=on_file_result)
-    page.overlay.append(file_picker)
+    file_picker = ft.FilePicker()
     page.overlay.append(mapping_dialog)
 
     # -- データ読み込み・表示ロジック --
@@ -201,7 +201,7 @@ def data_view_page(page: ft.Page) -> ft.Control:
             from src.data.indicator_loader import load_indicators
             df = load_indicators(dataset_id, frequency)
             current_df = df
-            page.session.set("df", df)
+            page.session.store.set("df", df)
 
             status_text.value = (
                 f"ID: {dataset_id} | {frequency} | "
@@ -230,7 +230,7 @@ def data_view_page(page: ft.Page) -> ft.Control:
             ]) for idx, row in display_df.iterrows()
         ]
         table = ft.DataTable(columns=columns, rows=rows, border=ft.border.all(1, ft.Colors.GREY_300), column_spacing=15)
-        data_table_container.controls.append(ft.Container(content=ft.Row([table], scroll=ft.ScrollMode.AUTO), height=350))
+        data_table_container.controls.append(ft.Container(content=ft.Row([table], scroll=ft.ScrollMode.AUTO), height=350, clip_behavior=ft.ClipBehavior.HARD_EDGE))
 
     def _update_indicator_checkboxes(columns: list[str]):
         indicator_checkboxes.controls = [ft.Checkbox(label=col, value=True) for col in columns]
@@ -254,7 +254,7 @@ def data_view_page(page: ft.Page) -> ft.Control:
                 ft.ElevatedButton(
                     "新規CSVインポート", 
                     icon=ft.Icons.UPLOAD_FILE, 
-                    on_click=lambda _: file_picker.pick_files(allow_multiple=False, allowed_extensions=["csv"])
+                    on_click=pick_csv
                 ),
             ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
             ft.Row([progress_bar, import_status]),
@@ -264,18 +264,12 @@ def data_view_page(page: ft.Page) -> ft.Control:
             ft.Text("最新データのプレビュー (先頭20行)", size=14, weight=ft.FontWeight.BOLD),
             data_table_container,
             ft.Divider(),
-            ft.Row([
-                ft.Column([
-                    ft.Text("時系列グラフ表示", size=16, weight=ft.FontWeight.BOLD),
-                    ft.Container(content=indicator_checkboxes, height=150, border=ft.border.all(1, ft.Colors.GREY_300), padding=8),
-                    plot_button,
-                ], width=300),
-                ft.VerticalDivider(),
-                ft.Container(content=plot_container, expand=True),
-            ], expand=True),
+            ft.Text("時系列グラフ表示", size=16, weight=ft.FontWeight.BOLD),
+            ft.Container(content=indicator_checkboxes, height=150, border=ft.border.all(1, ft.Colors.GREY_300), padding=8),
+            plot_button,
+            plot_container,
         ],
         spacing=10,
-        expand=True,
     )
 
     load_datasets()
