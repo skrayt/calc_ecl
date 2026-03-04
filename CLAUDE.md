@@ -46,6 +46,7 @@ calc_ecl/
 │   ├── page_correlation.py   ← 相関分析・VIF表示
 │   ├── page_regression.py    ← 回帰分析
 │   ├── page_model_selection.py ← モデル選択
+│   ├── page_dynamic_regression.py ← 動的回帰（変数別ラグ）
 │   ├── page_arima.py         ← ARIMA分析
 │   └── page_forecast.py      ← 将来シナリオ・予測
 ├── components/                ← 再利用UIパーツ
