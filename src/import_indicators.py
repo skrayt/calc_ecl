@@ -60,78 +60,53 @@ def detect_unit(col_name: str) -> str | None:
     return m.group(1) if m else None
 
 
-def prompt_new_mapping(col_name: str) -> dict | None:
-    """未知のカラムについてユーザーに対話的にマッピングを入力してもらう"""
-    print(f"\n{'='*60}")
-    print(f"未登録のカラムが見つかりました: 「{col_name}」")
-    print(f"{'='*60}")
-
-    # 自動検出値を表示
-    auto_base_year = detect_base_year(col_name)
-    auto_unit = detect_unit(col_name)
-
-    print(f"  自動検出 - 基準年: {auto_base_year or '(なし)'}")
-    print(f"  自動検出 - 単位: {auto_unit or '(なし)'}")
-    print()
-
-    action = input("  このカラムを (a)追加 / (s)スキップ対象に追加 / (i)今回だけ無視 ? [a/s/i]: ").strip().lower()
-
-    if action == "s":
-        return {"action": "skip"}
-    elif action == "i":
-        return None
-    elif action != "a":
-        print("  → 無視します")
-        return None
-
-    # 指標コードの入力
-    code = input("  指標コード (英語snake_case, 例: gdp_nominal_2025base): ").strip()
-    if not code:
-        print("  → コードが空のためスキップします")
-        return None
-
-    # 指標名の入力
-    name_default = re.sub(r"【.+?】", "", col_name).strip()
-    name = input(f"  指標名 [{name_default}]: ").strip()
-    if not name:
-        name = name_default
-
-    # 単位
-    unit_default = auto_unit or ""
-    unit = input(f"  単位 [{unit_default}]: ").strip()
-    if not unit:
-        unit = unit_default or None
-
-    # 基準年
-    base_year_default = auto_base_year or ""
-    base_year = input(f"  基準年 [{base_year_default}]: ").strip()
-    if not base_year:
-        base_year = base_year_default or None
-
-    # 代表的な粒度
-    print("  粒度: (m)onthly / (q)uarterly / (c)alendar_year / (f)iscal_year")
-    freq_input = input("  代表粒度 [m]: ").strip().lower()
-    freq_map = {"m": "monthly", "q": "quarterly", "c": "calendar_year", "f": "fiscal_year", "": "monthly"}
-    frequency = freq_map.get(freq_input, "monthly")
-
-    return {
-        "action": "add",
-        "code": code,
-        "name": name,
-        "unit": unit,
-        "base_year": base_year,
-        "frequency": frequency,
-    }
+def detect_indicator_name(col_name: str) -> str:
+    """カラム名から指標名を自動抽出する（単位部分を除去）"""
+    return re.sub(r"【.+?】", "", col_name).strip()
 
 
-def resolve_mapping(csv_columns: list[str]) -> dict:
-    """CSVカラムとマッピング設定を突合し、未知カラムがあれば対話的に解決する"""
+def detect_frequency_from_csv(csv_path: str, col_index: int) -> str:
+    """CSVデータをスキャンして、指定カラムに値がある行の時系列粒度を推定する。
+    最も細かい粒度（月次＞四半期＞暦年＞年度）を代表粒度とする。"""
+    import csv as csv_mod
+    freq_priority = {"monthly": 0, "quarterly": 1, "calendar_year": 2, "fiscal_year": 3}
+    best_freq = None
+
+    with open(csv_path, encoding="utf-8") as f:
+        reader = csv_mod.reader(f)
+        next(reader)  # ヘッダースキップ
+        for row in reader:
+            if col_index >= len(row) or not row[col_index].strip():
+                continue
+            time_str = row[0].strip().strip('"')
+            parsed = parse_time_point(time_str)
+            if parsed is None:
+                continue
+            _, freq = parsed
+            if best_freq is None or freq_priority.get(freq, 99) < freq_priority.get(best_freq, 99):
+                best_freq = freq
+
+    return best_freq or "monthly"
+
+
+def resolve_mapping(csv_path: str, csv_columns: list[str]) -> dict:
+    """CSVカラムとマッピング設定を突合する。
+
+    ルールベースで自動検出できるもの:
+        - 指標名: カラム名から単位【】を除去
+        - 基準年: カラム名から「YYYY年基準」を抽出
+        - 単位: カラム名から「【単位】」を抽出
+        - 粒度: CSVデータをスキャンして値がある行の時点パターンから推定
+
+    対話入力が必要なもの:
+        - 指標コード（英語snake_case）: 日本語→英語は自動変換できない
+    """
     mapping = load_mapping()
     known_columns = mapping["columns"]
     skip_columns = mapping.get("skip_columns", [])
     updated = False
 
-    for col in csv_columns:
+    for col_index, col in enumerate(csv_columns):
         # 既知のカラム or スキップ対象
         if col in known_columns or col in skip_columns:
             continue
@@ -140,24 +115,46 @@ def resolve_mapping(csv_columns: list[str]) -> dict:
         if col == "注記" or col.startswith("注記"):
             continue
 
-        # 未知のカラム → ユーザーに確認
-        result = prompt_new_mapping(col)
-        if result is None:
-            continue
-        elif result["action"] == "skip":
+        # ルールベースで自動検出
+        auto_name = detect_indicator_name(col)
+        auto_base_year = detect_base_year(col)
+        auto_unit = detect_unit(col)
+        auto_frequency = detect_frequency_from_csv(csv_path, col_index)
+
+        print(f"\n{'='*60}")
+        print(f"未登録のカラム: 「{col}」")
+        print(f"{'='*60}")
+        print(f"  自動検出 - 指標名: {auto_name}")
+        print(f"  自動検出 - 基準年: {auto_base_year or '(なし)'}")
+        print(f"  自動検出 - 単位:   {auto_unit or '(なし)'}")
+        print(f"  自動検出 - 粒度:   {auto_frequency}")
+        print()
+
+        action = input("  (a)追加 / (s)スキップ登録 / (i)今回だけ無視 ? [a/s/i]: ").strip().lower()
+
+        if action == "s":
             skip_columns.append(col)
             updated = True
-            print(f"  → スキップ対象に追加: 「{col}」")
-        elif result["action"] == "add":
+            print(f"  → スキップ対象に追加")
+        elif action == "a":
+            # 指標コードのみ対話入力（自動変換不可能なため）
+            code = input("  指標コード (英語snake_case, 例: gdp_nominal_2025base): ").strip()
+            if not code:
+                print("  → コードが空のためスキップします")
+                continue
+
             known_columns[col] = {
-                "code": result["code"],
-                "name": result["name"],
-                "unit": result["unit"],
-                "base_year": result["base_year"],
-                "frequency": result["frequency"],
+                "code": code,
+                "name": auto_name,
+                "unit": auto_unit,
+                "base_year": auto_base_year,
+                "frequency": auto_frequency,
             }
             updated = True
-            print(f"  → マッピング追加: 「{col}」→ {result['code']}")
+            print(f"  → 自動登録: {code} (名前={auto_name}, 単位={auto_unit}, "
+                  f"基準年={auto_base_year}, 粒度={auto_frequency})")
+        else:
+            print("  → 今回は無視します")
 
     if updated:
         mapping["columns"] = known_columns
@@ -281,8 +278,8 @@ def import_csv(csv_path: str, retrieved_at: date):
     df = pd.read_csv(csv_path, encoding="utf-8", dtype=str)
     print(f"CSV読み込み完了: {len(df)}行")
 
-    # カラムマッピングの解決（未知カラムがあれば対話的に追加）
-    mapping = resolve_mapping(list(df.columns))
+    # カラムマッピングの解決（未知カラムがあれば自動検出＋指標コードのみ対話入力）
+    mapping = resolve_mapping(csv_path, list(df.columns))
     column_mapping = mapping["columns"]
 
     # マッピング済みカラムの特定
