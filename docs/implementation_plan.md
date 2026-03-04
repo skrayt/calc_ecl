@@ -23,8 +23,8 @@ UI非依存の形で抽出・再利用し、UIはFletで新規構築する。
 | Phase 2-4 | regression（OLS回帰） | **完了** |
 | Phase 2-5 | model_selection（組み合わせ探索） | **完了** |
 | Phase 2-6 | arima（ARIMA時系列モデル） | **完了** |
-| Phase 3 | Flet GUIアプリ構築 | 未着手 |
-| Phase 4 | ドキュメント更新 | 未着手 |
+| Phase 3 | Flet GUIアプリ構築 | **完了** |
+| Phase 4 | ドキュメント更新 | **完了** |
 
 ---
 
