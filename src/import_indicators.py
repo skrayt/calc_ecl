@@ -90,32 +90,18 @@ def detect_frequency_from_csv(csv_path: str, col_index: int) -> str:
 
 
 def resolve_mapping(csv_path: str, csv_columns: list[str]) -> dict:
-    """CSVカラムとマッピング設定を突合する。
-
-    ルールベースで自動検出できるもの:
-        - 指標名: カラム名から単位【】を除去
-        - 基準年: カラム名から「YYYY年基準」を抽出
-        - 単位: カラム名から「【単位】」を抽出
-        - 粒度: CSVデータをスキャンして値がある行の時点パターンから推定
-
-    対話入力が必要なもの:
-        - 指標コード（英語snake_case）: 日本語→英語は自動変換できない
-    """
+    """（既存のターミナル用）CSVカラムとマッピング設定を突合する。"""
     mapping = load_mapping()
     known_columns = mapping["columns"]
     skip_columns = mapping.get("skip_columns", [])
     updated = False
 
     for col_index, col in enumerate(csv_columns):
-        # 既知のカラム or スキップ対象
         if col in known_columns or col in skip_columns:
             continue
-
-        # 「注記」カラムはスキップ（統計ダッシュボードCSVの構造上の列）
         if col == "注記" or col.startswith("注記"):
             continue
 
-        # ルールベースで自動検出
         auto_name = detect_indicator_name(col)
         auto_base_year = detect_base_year(col)
         auto_unit = detect_unit(col)
@@ -135,14 +121,10 @@ def resolve_mapping(csv_path: str, csv_columns: list[str]) -> dict:
         if action == "s":
             skip_columns.append(col)
             updated = True
-            print(f"  → スキップ対象に追加")
         elif action == "a":
-            # 指標コードのみ対話入力（自動変換不可能なため）
-            code = input("  指標コード (英語snake_case, 例: gdp_nominal_2025base): ").strip()
+            code = input("  指標コード (英語snake_case): ").strip()
             if not code:
-                print("  → コードが空のためスキップします")
                 continue
-
             known_columns[col] = {
                 "code": code,
                 "name": auto_name,
@@ -151,10 +133,56 @@ def resolve_mapping(csv_path: str, csv_columns: list[str]) -> dict:
                 "frequency": auto_frequency,
             }
             updated = True
-            print(f"  → 自動登録: {code} (名前={auto_name}, 単位={auto_unit}, "
-                  f"基準年={auto_base_year}, 粒度={auto_frequency})")
         else:
-            print("  → 今回は無視します")
+            continue
+
+    if updated:
+        mapping["columns"] = known_columns
+        mapping["skip_columns"] = skip_columns
+        save_mapping(mapping)
+
+    return mapping
+
+
+def resolve_mapping_gui(csv_path: str, csv_columns: list[str], prompt_callback) -> dict:
+    """GUI用のマッピング解決。
+    prompt_callback: (col_name, auto_detected_info) -> result_dict or None を呼び出す。
+    """
+    mapping = load_mapping()
+    known_columns = mapping["columns"]
+    skip_columns = mapping.get("skip_columns", [])
+    updated = False
+
+    for col_index, col in enumerate(csv_columns):
+        if col in known_columns or col in skip_columns:
+            continue
+        if col == "注記" or col.startswith("注記"):
+            continue
+
+        auto_info = {
+            "name": detect_indicator_name(col),
+            "base_year": detect_base_year(col),
+            "unit": detect_unit(col),
+            "frequency": detect_frequency_from_csv(csv_path, col_index)
+        }
+
+        # GUI側へ入力を依頼
+        result = prompt_callback(col, auto_info)
+        
+        if result is None: # 無視
+            continue
+        elif result.get("action") == "skip":
+            skip_columns.append(col)
+            updated = True
+        elif result.get("action") == "add" and result.get("code"):
+            known_columns[col] = {
+                "code": result["code"],
+                "name": auto_info["name"],
+                "unit": auto_info["unit"],
+                "base_year": auto_info["base_year"],
+                "frequency": auto_info["frequency"],
+            }
+            updated = True
 
     if updated:
         mapping["columns"] = known_columns
@@ -272,6 +300,107 @@ def ensure_indicator_definitions(cur, source_id: int, column_mapping: dict):
 # =========================================================
 # CSVパース & インポート
 # =========================================================
+def import_csv_gui(csv_path: str, retrieved_at: date, progress_callback=None, prompt_callback=None):
+    """GUI経由のインポート実行"""
+    df = pd.read_csv(csv_path, encoding="utf-8", dtype=str)
+    
+    # 1. カラムマッピングの解決
+    if prompt_callback:
+        mapping = resolve_mapping_gui(csv_path, list(df.columns), prompt_callback)
+    else:
+        mapping = load_mapping()
+    
+    column_mapping = mapping["columns"]
+    value_columns = []
+    columns = list(df.columns)
+    for i, col in enumerate(columns):
+        if col in column_mapping:
+            value_columns.append((col, column_mapping[col]))
+
+    if not value_columns:
+        raise ValueError("マッピング済みの指標カラムがありません")
+
+    note_col_indices = {}
+    for i, col in enumerate(columns):
+        if col in column_mapping:
+            if i + 1 < len(columns) and (columns[i + 1] == "注記" or columns[i + 1].startswith("注記")):
+                note_col_indices[col] = i + 1
+
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        source_id = ensure_source(cur)
+        ensure_indicator_definitions(cur, source_id, column_mapping)
+        
+        indicator_keys = [m["code"] for _, m in value_columns]
+        dataset_id = create_dataset(cur, source_id, retrieved_at, indicator_keys)
+
+        total = len(df)
+        inserted = 0
+        skipped = 0
+
+        for idx, row in df.iterrows():
+            if progress_callback and idx % 10 == 0:
+                progress_callback(idx, total)
+
+            time_str = row["時点"]
+            parsed = parse_time_point(time_str)
+            if parsed is None:
+                skipped += 1
+                continue
+
+            ref_date, frequency = parsed
+            region_code = row["地域コード"]
+            region_name = row["地域"]
+
+            indicators = {}
+            notes = {}
+
+            for col_name, col_def in value_columns:
+                val = row[col_name]
+                if pd.isna(val) or val == "":
+                    continue
+
+                try:
+                    num_val = float(val.replace(",", ""))
+                    indicators[col_def["code"]] = int(num_val) if num_val == int(num_val) else num_val
+                except ValueError:
+                    continue
+
+                if col_name in note_col_indices:
+                    note_idx = note_col_indices[col_name]
+                    note_val = row.iloc[note_idx]
+                    if pd.notna(note_val) and note_val != "":
+                        notes[col_def["code"]] = note_val
+
+            if not indicators:
+                skipped += 1
+                continue
+
+            cur.execute(
+                """INSERT INTO indicator_data
+                   (dataset_id, reference_date, frequency, region_code, region_name, indicators, notes)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s)
+                   ON CONFLICT (dataset_id, reference_date, frequency, region_code)
+                   DO UPDATE SET
+                       indicators = indicator_data.indicators || EXCLUDED.indicators,
+                       notes = COALESCE(indicator_data.notes, '{}'::jsonb) || COALESCE(EXCLUDED.notes, '{}'::jsonb),
+                       imported_at = now()""",
+                (dataset_id, ref_date, frequency, region_code, region_name, 
+                 json.dumps(indicators), json.dumps(notes) if notes else None),
+            )
+            inserted += 1
+
+        conn.commit()
+        return {"inserted": inserted, "skipped": skipped, "dataset_id": dataset_id}
+
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
+
+
 def import_csv(csv_path: str, retrieved_at: date):
     """メインのインポート処理"""
     # CSV読み込み

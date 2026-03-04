@@ -1,0 +1,27 @@
+services:
+  db:
+    image: postgres:15
+    container_name: calc_ecl_db
+    restart: always
+    environment:
+      POSTGRES_DB: Craft
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./db_data:/var/lib/postgresql/data
+      # 起動時に自動でテーブルを作成するようにマウント
+      - ./db/migrations/001_create_tables.sql:/docker-entrypoint-initdb.d/001_create_tables.sql
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: calc_ecl_pgadmin
+    restart: always
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "8080:80"
+    depends_on:
+      - db
