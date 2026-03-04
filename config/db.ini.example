@@ -1,6 +1,7 @@
 [postgresql]
 host = localhost
 port = 5432
-dbname = calc_ecl
+dbname = Craft
+schema = calc_ecl
 user = postgres
 password = your_password_here

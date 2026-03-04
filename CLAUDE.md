@@ -9,7 +9,7 @@ IFRS9/予想信用損失(ECL)モデルの将来予想に使用するマクロ経
 | 項目 | 技術 |
 |------|------|
 | 言語 | Python 3.12（本番: WinPython64-3.12.4.1） |
-| DB | PostgreSQL 15 |
+| DB | PostgreSQL 15（DB名: Craft, スキーマ: calc_ecl） |
 | DB管理ツール | PgAdmin4（SQLは手動実行） |
 | GUI | Flet（Flutter for Python） |
 | 統計分析 | statsmodels, scikit-learn |

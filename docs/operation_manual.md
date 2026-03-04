@@ -34,17 +34,19 @@ pip install -r requirements.txt
    [postgresql]
    host = localhost
    port = 5432
-   dbname = calc_ecl
+   dbname = Craft
+   schema = calc_ecl
    user = postgres
    password = （実際のパスワード）
    ```
 
-### 1.4 データベース作成
+### 1.4 データベース・スキーマ作成
 
 1. PgAdmin4を開く
-2. データベース `calc_ecl` を新規作成する
-3. `db/migrations/001_create_tables.sql` の内容をクエリツールにコピー＆ペーストして実行する
-4. 7テーブルが作成されたことを確認する
+2. データベース `Craft` を新規作成する（既に存在する場合はスキップ）
+3. クエリツールで `CREATE SCHEMA IF NOT EXISTS calc_ecl;` を実行する
+4. `db/migrations/001_create_tables.sql` の内容をクエリツールにコピー＆ペーストして実行する
+5. 7テーブルが `calc_ecl` スキーマ内に作成されたことを確認する
 
 作成されるテーブル一覧:
 
