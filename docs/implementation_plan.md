@@ -17,10 +17,10 @@ UI非依存の形で抽出・再利用し、UIはFletで新規構築する。
 | Phase | 内容 | 状態 |
 |-------|------|------|
 | Phase 1 | 基盤更新（requirements, CLAUDE.md） | **完了** |
-| Phase 2-1 | indicator_loader（DB→DataFrame） | 未着手 |
-| Phase 2-2 | data_transform（データ変換） | 未着手 |
-| Phase 2-3 | correlation（相関分析・VIF） | 未着手 |
-| Phase 2-4 | regression（OLS回帰） | 未着手 |
+| Phase 2-1 | indicator_loader（DB→DataFrame） | **完了** |
+| Phase 2-2 | data_transform（データ変換） | **完了** |
+| Phase 2-3 | correlation（相関分析・VIF） | **完了** |
+| Phase 2-4 | regression（OLS回帰） | **完了** |
 | Phase 2-5 | model_selection（組み合わせ探索） | 未着手 |
 | Phase 2-6 | arima（ARIMA時系列モデル） | 未着手 |
 | Phase 3 | Flet GUIアプリ構築 | 未着手 |
