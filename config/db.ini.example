@@ -1,0 +1,6 @@
+[postgresql]
+host = localhost
+port = 5432
+dbname = calc_ecl
+user = postgres
+password = your_password_here
