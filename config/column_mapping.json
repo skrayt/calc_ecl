@@ -1,0 +1,45 @@
+{
+  "columns": {
+    "総人口（総数）【人】": {
+      "code": "total_population",
+      "name": "総人口（総数）",
+      "unit": "人",
+      "base_year": null,
+      "frequency": "monthly"
+    },
+    "完全失業率（男女計）【%】": {
+      "code": "unemployment_rate",
+      "name": "完全失業率（男女計）",
+      "unit": "%",
+      "base_year": null,
+      "frequency": "monthly"
+    },
+    "景気動向指数（一致）2020年基準": {
+      "code": "ci_index_2020base",
+      "name": "景気動向指数（一致）2020年基準",
+      "unit": null,
+      "base_year": "2020",
+      "frequency": "monthly"
+    },
+    "国内総生産（支出側）（名目）2020年基準【10億円】": {
+      "code": "gdp_nominal_2020base",
+      "name": "国内総生産（支出側）（名目）2020年基準",
+      "unit": "10億円",
+      "base_year": "2020",
+      "frequency": "quarterly"
+    },
+    "県内総生産（名目）2015年基準【百万円】": {
+      "code": "prefectural_gdp_2015base",
+      "name": "県内総生産（名目）2015年基準",
+      "unit": "百万円",
+      "base_year": "2015",
+      "frequency": "fiscal_year"
+    }
+  },
+  "skip_columns": [
+    "時点",
+    "地域コード",
+    "地域",
+    "注記"
+  ]
+}

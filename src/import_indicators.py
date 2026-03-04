@@ -5,10 +5,12 @@
     python src/import_indicators.py indicator/DataSearchResult_XXXXXX.csv
 
 処理の流れ:
-    1. indicator_sources に出典を登録（初回のみ）
-    2. indicator_datasets にデータセット（取得回）を登録
-    3. indicator_definitions に指標定義を登録（未登録の場合）
-    4. CSVをパースして indicator_data へINSERT
+    1. config/column_mapping.json からカラムマッピングを読み込む
+    2. CSVに未知のカラムがあれば対話的にマッピングを追加（JSONに保存）
+    3. indicator_sources に出典を登録（初回のみ）
+    4. indicator_datasets にデータセット（取得回）を登録
+    5. indicator_definitions に指標定義を登録（未登録の場合）
+    6. CSVをパースして indicator_data へINSERT
 """
 import argparse
 import json
@@ -20,54 +22,149 @@ from pathlib import Path
 import pandas as pd
 
 # プロジェクトルートをパスに追加
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 from config.db import get_connection
 
+# マッピング設定ファイルのパス
+MAPPING_FILE = PROJECT_ROOT / "config" / "column_mapping.json"
+
 
 # =========================================================
-# CSVカラム → 指標コードのマッピング定義
+# カラムマッピング管理
 # =========================================================
-COLUMN_MAPPING = {
-    "総人口（総数）【人】": {
-        "code": "total_population",
-        "name": "総人口（総数）",
-        "unit": "人",
-        "base_year": None,
-    },
-    "完全失業率（男女計）【%】": {
-        "code": "unemployment_rate",
-        "name": "完全失業率（男女計）",
-        "unit": "%",
-        "base_year": None,
-    },
-    "景気動向指数（一致）2020年基準": {
-        "code": "ci_index_2020base",
-        "name": "景気動向指数（一致）2020年基準",
-        "unit": None,
-        "base_year": "2020",
-    },
-    "国内総生産（支出側）（名目）2020年基準【10億円】": {
-        "code": "gdp_nominal_2020base",
-        "name": "国内総生産（支出側）（名目）2020年基準",
-        "unit": "10億円",
-        "base_year": "2020",
-    },
-    "県内総生産（名目）2015年基準【百万円】": {
-        "code": "prefectural_gdp_2015base",
-        "name": "県内総生産（名目）2015年基準",
-        "unit": "百万円",
-        "base_year": "2015",
-    },
-}
+def load_mapping() -> dict:
+    """column_mapping.json を読み込む"""
+    if not MAPPING_FILE.exists():
+        return {"columns": {}, "skip_columns": ["時点", "地域コード", "地域", "注記"]}
+    with open(MAPPING_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
 
-# 各指標が取り得る時系列粒度
-INDICATOR_FREQUENCIES = {
-    "total_population": ["monthly", "calendar_year"],
-    "unemployment_rate": ["monthly", "quarterly", "calendar_year", "fiscal_year"],
-    "ci_index_2020base": ["monthly"],
-    "gdp_nominal_2020base": ["quarterly", "calendar_year", "fiscal_year"],
-    "prefectural_gdp_2015base": ["fiscal_year"],
-}
+
+def save_mapping(mapping: dict):
+    """column_mapping.json に保存"""
+    with open(MAPPING_FILE, "w", encoding="utf-8") as f:
+        json.dump(mapping, f, ensure_ascii=False, indent=2)
+    print(f"マッピング設定を保存: {MAPPING_FILE}")
+
+
+def detect_base_year(col_name: str) -> str | None:
+    """カラム名から基準年を自動検出する（例: '2020年基準' → '2020'）"""
+    m = re.search(r"(\d{4})年基準", col_name)
+    return m.group(1) if m else None
+
+
+def detect_unit(col_name: str) -> str | None:
+    """カラム名から単位を自動検出する（例: '【10億円】' → '10億円'）"""
+    m = re.search(r"【(.+?)】", col_name)
+    return m.group(1) if m else None
+
+
+def prompt_new_mapping(col_name: str) -> dict | None:
+    """未知のカラムについてユーザーに対話的にマッピングを入力してもらう"""
+    print(f"\n{'='*60}")
+    print(f"未登録のカラムが見つかりました: 「{col_name}」")
+    print(f"{'='*60}")
+
+    # 自動検出値を表示
+    auto_base_year = detect_base_year(col_name)
+    auto_unit = detect_unit(col_name)
+
+    print(f"  自動検出 - 基準年: {auto_base_year or '(なし)'}")
+    print(f"  自動検出 - 単位: {auto_unit or '(なし)'}")
+    print()
+
+    action = input("  このカラムを (a)追加 / (s)スキップ対象に追加 / (i)今回だけ無視 ? [a/s/i]: ").strip().lower()
+
+    if action == "s":
+        return {"action": "skip"}
+    elif action == "i":
+        return None
+    elif action != "a":
+        print("  → 無視します")
+        return None
+
+    # 指標コードの入力
+    code = input("  指標コード (英語snake_case, 例: gdp_nominal_2025base): ").strip()
+    if not code:
+        print("  → コードが空のためスキップします")
+        return None
+
+    # 指標名の入力
+    name_default = re.sub(r"【.+?】", "", col_name).strip()
+    name = input(f"  指標名 [{name_default}]: ").strip()
+    if not name:
+        name = name_default
+
+    # 単位
+    unit_default = auto_unit or ""
+    unit = input(f"  単位 [{unit_default}]: ").strip()
+    if not unit:
+        unit = unit_default or None
+
+    # 基準年
+    base_year_default = auto_base_year or ""
+    base_year = input(f"  基準年 [{base_year_default}]: ").strip()
+    if not base_year:
+        base_year = base_year_default or None
+
+    # 代表的な粒度
+    print("  粒度: (m)onthly / (q)uarterly / (c)alendar_year / (f)iscal_year")
+    freq_input = input("  代表粒度 [m]: ").strip().lower()
+    freq_map = {"m": "monthly", "q": "quarterly", "c": "calendar_year", "f": "fiscal_year", "": "monthly"}
+    frequency = freq_map.get(freq_input, "monthly")
+
+    return {
+        "action": "add",
+        "code": code,
+        "name": name,
+        "unit": unit,
+        "base_year": base_year,
+        "frequency": frequency,
+    }
+
+
+def resolve_mapping(csv_columns: list[str]) -> dict:
+    """CSVカラムとマッピング設定を突合し、未知カラムがあれば対話的に解決する"""
+    mapping = load_mapping()
+    known_columns = mapping["columns"]
+    skip_columns = mapping.get("skip_columns", [])
+    updated = False
+
+    for col in csv_columns:
+        # 既知のカラム or スキップ対象
+        if col in known_columns or col in skip_columns:
+            continue
+
+        # 「注記」カラムはスキップ（統計ダッシュボードCSVの構造上の列）
+        if col == "注記" or col.startswith("注記"):
+            continue
+
+        # 未知のカラム → ユーザーに確認
+        result = prompt_new_mapping(col)
+        if result is None:
+            continue
+        elif result["action"] == "skip":
+            skip_columns.append(col)
+            updated = True
+            print(f"  → スキップ対象に追加: 「{col}」")
+        elif result["action"] == "add":
+            known_columns[col] = {
+                "code": result["code"],
+                "name": result["name"],
+                "unit": result["unit"],
+                "base_year": result["base_year"],
+                "frequency": result["frequency"],
+            }
+            updated = True
+            print(f"  → マッピング追加: 「{col}」→ {result['code']}")
+
+    if updated:
+        mapping["columns"] = known_columns
+        mapping["skip_columns"] = skip_columns
+        save_mapping(mapping)
+
+    return mapping
 
 
 # =========================================================
@@ -150,16 +247,12 @@ def create_dataset(cur, source_id: int, retrieved_at: date, indicator_keys: list
     return cur.fetchone()[0]
 
 
-def ensure_indicator_definitions(cur, source_id: int):
+def ensure_indicator_definitions(cur, source_id: int, column_mapping: dict):
     """indicator_definitions に未登録の指標を登録"""
-    for col_name, mapping in COLUMN_MAPPING.items():
-        # 指標が取り得る最も細かい粒度を代表として登録
-        frequencies = INDICATOR_FREQUENCIES.get(mapping["code"], ["monthly"])
-        freq = frequencies[0]
-
+    for _, col_def in column_mapping.items():
         cur.execute(
             "SELECT indicator_id FROM indicator_definitions WHERE indicator_code = %s",
-            (mapping["code"],),
+            (col_def["code"],),
         )
         if cur.fetchone():
             continue
@@ -169,11 +262,11 @@ def ensure_indicator_definitions(cur, source_id: int):
                (indicator_code, indicator_name, base_year, unit, frequency, source_id)
                VALUES (%s, %s, %s, %s, %s, %s)""",
             (
-                mapping["code"],
-                mapping["name"],
-                mapping["base_year"],
-                mapping["unit"],
-                freq,
+                col_def["code"],
+                col_def["name"],
+                col_def["base_year"],
+                col_def["unit"],
+                col_def.get("frequency", "monthly"),
                 source_id,
             ),
         )
@@ -188,26 +281,29 @@ def import_csv(csv_path: str, retrieved_at: date):
     df = pd.read_csv(csv_path, encoding="utf-8", dtype=str)
     print(f"CSV読み込み完了: {len(df)}行")
 
-    # 注記カラムの位置を特定
-    # CSVは [指標値, 注記, 指標値, 注記, ...] の構造
+    # カラムマッピングの解決（未知カラムがあれば対話的に追加）
+    mapping = resolve_mapping(list(df.columns))
+    column_mapping = mapping["columns"]
+
+    # マッピング済みカラムの特定
     value_columns = []
-    note_columns = []
     columns = list(df.columns)
     for i, col in enumerate(columns):
-        if col in COLUMN_MAPPING:
-            value_columns.append((col, COLUMN_MAPPING[col]))
-            # 直後の「注記」カラムを対応する注記列とする
-            if i + 1 < len(columns) and columns[i + 1] == "注記":
-                note_columns.append((col, columns[i + 1]))
-            elif i + 1 < len(columns) and columns[i + 1].startswith("注記"):
-                note_columns.append((col, columns[i + 1]))
+        if col in column_mapping:
+            value_columns.append((col, column_mapping[col]))
+
+    if not value_columns:
+        print("エラー: マッピング済みの指標カラムがありません")
+        sys.exit(1)
+
+    print(f"マッピング済み指標: {[m['code'] for _, m in value_columns]}")
 
     # 注記カラム名の重複を解消するためインデックスベースで管理
     note_col_indices = {}
     for i, col in enumerate(columns):
-        if col in COLUMN_MAPPING:
+        if col in column_mapping:
             # 直後が「注記」系なら記録
-            if i + 1 < len(columns):
+            if i + 1 < len(columns) and (columns[i + 1] == "注記" or columns[i + 1].startswith("注記")):
                 note_col_indices[col] = i + 1
 
     conn = get_connection()
@@ -219,7 +315,7 @@ def import_csv(csv_path: str, retrieved_at: date):
         print(f"データソースID: {source_id}")
 
         # 2. 指標定義登録
-        ensure_indicator_definitions(cur, source_id)
+        ensure_indicator_definitions(cur, source_id, column_mapping)
         print("指標定義マスタ登録完了")
 
         # 3. データセット登録
@@ -246,7 +342,7 @@ def import_csv(csv_path: str, retrieved_at: date):
             indicators = {}
             notes = {}
 
-            for col_name, mapping in value_columns:
+            for col_name, col_def in value_columns:
                 val = row[col_name]
                 if pd.isna(val) or val == "":
                     continue
@@ -256,9 +352,9 @@ def import_csv(csv_path: str, retrieved_at: date):
                     num_val = float(val.replace(",", ""))
                     # 整数として扱える場合はintに
                     if num_val == int(num_val):
-                        indicators[mapping["code"]] = int(num_val)
+                        indicators[col_def["code"]] = int(num_val)
                     else:
-                        indicators[mapping["code"]] = num_val
+                        indicators[col_def["code"]] = num_val
                 except ValueError:
                     continue
 
@@ -267,7 +363,7 @@ def import_csv(csv_path: str, retrieved_at: date):
                     note_idx = note_col_indices[col_name]
                     note_val = row.iloc[note_idx]
                     if pd.notna(note_val) and note_val != "":
-                        notes[mapping["code"]] = note_val
+                        notes[col_def["code"]] = note_val
 
             # 指標が1つもなければスキップ
             if not indicators:
