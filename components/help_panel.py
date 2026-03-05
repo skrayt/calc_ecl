@@ -28,7 +28,7 @@ def build_help_panel(
         ft.Row(
             controls=[
                 ft.Text(f"  {i+1}. ", size=13, color=ft.Colors.BLUE_700, weight=ft.FontWeight.BOLD),
-                ft.Text(step, size=13, expand=True),
+                ft.Text(step, size=13),
             ],
             wrap=True,
         )
@@ -39,7 +39,7 @@ def build_help_panel(
         ft.Row(
             controls=[
                 ft.Text("  • ", size=13, color=ft.Colors.GREEN_700, weight=ft.FontWeight.BOLD),
-                ft.Text(output, size=13, expand=True),
+                ft.Text(output, size=13),
             ],
             wrap=True,
         )
@@ -54,22 +54,26 @@ def build_help_panel(
             ),
             ft.Row(
                 controls=[
-                    ft.Column(
-                        controls=[
-                            ft.Text("操作手順", size=13, weight=ft.FontWeight.BOLD, color=ft.Colors.BLUE_700),
-                            *step_items,
-                        ],
+                    ft.Container(
+                        content=ft.Column(
+                            controls=[
+                                ft.Text("操作手順", size=13, weight=ft.FontWeight.BOLD, color=ft.Colors.BLUE_700),
+                                *step_items,
+                            ],
+                            spacing=4,
+                        ),
                         expand=True,
-                        spacing=4,
                     ),
                     ft.VerticalDivider(width=1, color=ft.Colors.GREY_300),
-                    ft.Column(
-                        controls=[
-                            ft.Text("表示される結果", size=13, weight=ft.FontWeight.BOLD, color=ft.Colors.GREEN_700),
-                            *output_items,
-                        ],
+                    ft.Container(
+                        content=ft.Column(
+                            controls=[
+                                ft.Text("表示される結果", size=13, weight=ft.FontWeight.BOLD, color=ft.Colors.GREEN_700),
+                                *output_items,
+                            ],
+                            spacing=4,
+                        ),
                         expand=True,
-                        spacing=4,
                     ),
                 ],
                 spacing=16,

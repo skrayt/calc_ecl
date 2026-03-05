@@ -79,7 +79,7 @@ def correlation_page(page: ft.Page) -> ft.Control:
             corr = calc_correlation_matrix(work_df)
             img_corr = plot_correlation_heatmap(corr)
             results.append(ft.Text("相関行列", size=18, weight=ft.FontWeight.BOLD))
-            results.append(ft.Image(src_base64=img_corr, fit=ft.ImageFit.CONTAIN))
+            results.append(ft.Image(src="data:image/png;base64," + img_corr, fit=ft.BoxFit.CONTAIN))
 
             # VIF一覧
             if len(features) >= 2:
@@ -113,7 +113,7 @@ def correlation_page(page: ft.Page) -> ft.Control:
                 img_vif = plot_vif_heatmap(vif_cross)
                 results.append(ft.Divider())
                 results.append(ft.Text("VIFクロス表", size=18, weight=ft.FontWeight.BOLD))
-                results.append(ft.Image(src_base64=img_vif, fit=ft.ImageFit.CONTAIN))
+                results.append(ft.Image(src="data:image/png;base64," + img_vif, fit=ft.BoxFit.CONTAIN))
             else:
                 results.append(ft.Text("VIF算出には説明変数を2つ以上選択してください。", size=12, italic=True))
 

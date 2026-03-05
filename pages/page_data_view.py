@@ -12,6 +12,7 @@ from src.data.indicator_loader import (
     list_datasets,
     list_frequencies,
     load_indicators,
+    get_indicator_definitions,
 )
 from components.plot_utils import plot_time_series, plot_time_series_grid
 from src.import_indicators import import_csv_gui
@@ -24,6 +25,7 @@ def data_view_page(page: ft.Page) -> ft.Control:
 
     # == 状態変数 ==
     current_df: pd.DataFrame | None = None
+    code_to_name: dict[str, str] = {}  # indicator_code → indicator_name（日本語表示用）
     import_result_data = None
     prompt_result = None
     prompt_event = threading.Event()
@@ -197,11 +199,15 @@ def data_view_page(page: ft.Page) -> ft.Control:
         _load_data(int(dataset_dropdown.value), e.control.value)
 
     def _load_data(dataset_id: int, frequency: str):
-        nonlocal current_df
+        nonlocal current_df, code_to_name
         try:
             from src.data.indicator_loader import load_indicators
             df = load_indicators(dataset_id, frequency)
             current_df = df
+            # indicator_code → indicator_name のマッピングを取得
+            if not df.empty:
+                defs = get_indicator_definitions(df.columns.tolist())
+                code_to_name = dict(zip(defs["indicator_code"], defs["indicator_name"]))
             page.session.store.set("df", df)
 
             status_text.value = (
@@ -223,26 +229,83 @@ def data_view_page(page: ft.Page) -> ft.Control:
     def _update_data_table(df: pd.DataFrame):
         data_table_container.controls.clear()
         display_df = df.head(20)
-        columns = [ft.DataColumn(ft.Text("日付", size=11))] + [ft.DataColumn(ft.Text(c, size=11)) for c in display_df.columns]
-        rows = [
-            ft.DataRow(cells=[ft.DataCell(ft.Text(str(idx.date()), size=10))] + [
-                ft.DataCell(ft.Text(f"{row[c]:.4f}" if pd.notna(row[c]) else "-", size=10)) 
-                for c in display_df.columns
-            ]) for idx, row in display_df.iterrows()
-        ]
-        table = ft.DataTable(columns=columns, rows=rows, border=ft.border.all(1, ft.Colors.GREY_300), column_spacing=15)
-        data_table_container.controls.append(ft.Container(content=ft.Row([table], scroll=ft.ScrollMode.AUTO), height=350, clip_behavior=ft.ClipBehavior.HARD_EDGE))
+
+        COL_DATE_W = 90
+        COL_W = 130  # 各指標列の固定幅
+
+        HEADER_H = 50  # ヘッダー固定高さ（2行分を想定）
+        DATA_H = 28    # データ行固定高さ
+
+        def _header_cell(text, width):
+            return ft.Container(
+                content=ft.Text(text, size=10, weight=ft.FontWeight.BOLD),
+                width=width,
+                height=HEADER_H,
+                padding=ft.padding.symmetric(horizontal=6, vertical=4),
+                border=ft.border.all(1, ft.Colors.GREY_300),
+                alignment=ft.alignment.Alignment(-1, 0),
+            )
+
+        def _cell(text, width):
+            return ft.Container(
+                content=ft.Text(text, size=10),
+                width=width,
+                height=DATA_H,
+                padding=ft.padding.symmetric(horizontal=6, vertical=4),
+                border=ft.border.all(1, ft.Colors.GREY_300),
+                alignment=ft.alignment.Alignment(-1, 0),
+            )
+
+        # ヘッダー行
+        header = ft.Row(
+            controls=(
+                [_header_cell("日付", COL_DATE_W)]
+                + [_header_cell(code_to_name.get(c, c), COL_W) for c in display_df.columns]
+            ),
+            spacing=0,
+        )
+
+        # 列ごとに整数列かどうかを判定（全非NaN値が整数なら整数列）
+        def _is_int_col(series):
+            valid = series.dropna()
+            return len(valid) > 0 and (valid == valid.round()).all()
+
+        is_int = {c: _is_int_col(display_df[c]) for c in display_df.columns}
+
+        def _fmt(val, col):
+            if pd.isna(val):
+                return "-"
+            return f"{int(val):,}" if is_int[col] else f"{val:.2f}"
+
+        # データ行
+        data_rows = []
+        for idx, row in display_df.iterrows():
+            data_rows.append(ft.Row(
+                controls=(
+                    [_cell(str(idx.date()), COL_DATE_W)]
+                    + [_cell(_fmt(row[c], c), COL_W) for c in display_df.columns]
+                ),
+                spacing=0,
+            ))
+
+        table_col = ft.Column(controls=[header] + data_rows, spacing=0)
+        data_table_container.controls.append(
+            ft.Row(controls=[table_col], scroll=ft.ScrollMode.AUTO)
+        )
 
     def _update_indicator_checkboxes(columns: list[str]):
-        indicator_checkboxes.controls = [ft.Checkbox(label=col, value=True) for col in columns]
+        indicator_checkboxes.controls = [
+            ft.Checkbox(label=code_to_name.get(col, col), data=col, value=True)
+            for col in columns
+        ]
 
     def on_plot_click():
-        selected_cols = [cb.label for cb in indicator_checkboxes.controls if cb.value]
+        selected_cols = [cb.data for cb in indicator_checkboxes.controls if cb.value]
         if not selected_cols: return
         plot_container.controls.clear()
         try:
             img = plot_time_series(current_df, selected_cols) if len(selected_cols) <= 3 else plot_time_series_grid(current_df, selected_cols)
-            plot_container.controls.append(ft.Image(src_base64=img, fit=ft.ImageFit.CONTAIN))
+            plot_container.controls.append(ft.Image(src="data:image/png;base64," + img, fit=ft.BoxFit.CONTAIN))
         except Exception as ex:
             plot_container.controls.append(ft.Text(f"エラー: {ex}", color=ft.Colors.RED_700))
         page.update()

@@ -148,7 +148,7 @@ def dynamic_regression_page(page: ft.Page) -> ft.Control:
             # 残差プロット
             results.append(ft.Divider())
             img = plot_residuals(ols["resid"], ols["fitted"])
-            results.append(ft.Image(src_base64=img, fit=ft.ImageFit.CONTAIN))
+            results.append(ft.Image(src="data:image/png;base64," + img, fit=ft.BoxFit.CONTAIN))
 
             result_container.controls = results
             print("DEBUG: 動的回帰完了")

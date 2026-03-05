@@ -93,7 +93,7 @@ def arima_page(page: ft.Page) -> ft.Control:
             )
             results.append(ft.Divider())
             results.append(ft.Text("ACF / PACF", size=18, weight=ft.FontWeight.BOLD))
-            results.append(ft.Image(src_base64=img, fit=ft.ImageFit.CONTAIN))
+            results.append(ft.Image(src="data:image/png;base64," + img, fit=ft.BoxFit.CONTAIN))
 
             result_container.controls = results
             print("DEBUG: ADF検定完了")
@@ -209,7 +209,7 @@ def arima_page(page: ft.Page) -> ft.Control:
             img = plot_forecast(y, fc, title=f"ARIMA{order} 予測（{steps}期先）")
             results.append(ft.Divider())
             results.append(ft.Text(f"将来予測（{steps}期先）", size=16, weight=ft.FontWeight.BOLD))
-            results.append(ft.Image(src_base64=img, fit=ft.ImageFit.CONTAIN))
+            results.append(ft.Image(src="data:image/png;base64," + img, fit=ft.BoxFit.CONTAIN))
         except Exception as ex:
             results.append(ft.Text(f"予測エラー: {ex}", color=ft.Colors.ORANGE_700))
 

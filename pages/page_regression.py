@@ -133,7 +133,7 @@ def regression_page(page: ft.Page) -> ft.Control:
             results.append(ft.Divider())
             results.append(ft.Text("残差プロット", size=18, weight=ft.FontWeight.BOLD))
             img_resid = plot_residuals(ols["resid"], ols["fitted"])
-            results.append(ft.Image(src_base64=img_resid, fit=ft.ImageFit.CONTAIN))
+            results.append(ft.Image(src="data:image/png;base64," + img_resid, fit=ft.BoxFit.CONTAIN))
 
             # 交差検証
             try:
