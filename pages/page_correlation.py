@@ -8,10 +8,9 @@ import pandas as pd
 from components.variable_selector import VariableSelector
 from components.plot_utils import plot_correlation_heatmap, plot_vif_heatmap
 from components.help_panel import build_help_panel
-from src.analysis.data_transform import transform, standardize
+from components.data_source_selector import DataSourceSelector
+from src.analysis.data_transform import transform, standardize, TRANSFORM_METHODS
 from src.data.indicator_loader import (
-    get_indicator_definitions,
-    get_target_definitions,
     merge_target_and_indicators,
 )
 from src.analysis.correlation import (
@@ -25,38 +24,50 @@ def correlation_page(page: ft.Page) -> ft.Control:
     """相関分析タブのUIを構築する"""
     print("DEBUG: 相関分析ページ構築開始")
 
-    # 共有データを取得
-    df: pd.DataFrame | None = page.session.store.get("df")
-    if df is None or df.empty:
-        return ft.Text("先にデータ閲覧タブでデータを読み込んでください。", color=ft.Colors.RED_700)
+    # 変数セレクタ（後から構築）
+    selector_container = ft.Column()
+    selector_ref = [None]
+    # データ参照用
+    ind_df_ref = [None]
+    tgt_df_ref = [None]
+    code_to_name_ref = [{}]
 
-    # indicator_code → indicator_name のマッピングを取得
-    defs = get_indicator_definitions(df.columns.tolist())
-    code_to_name: dict[str, str] = dict(zip(defs["indicator_code"], defs["indicator_name"]))
+    def on_data_loaded(indicator_df, target_df, code_to_name, target_c2n):
+        """データソース変更時に変数セレクタを再構築する"""
+        ind_df_ref[0] = indicator_df
+        tgt_df_ref[0] = target_df
+        all_c2n = dict(code_to_name)
+        all_c2n.update(target_c2n)
+        code_to_name_ref[0] = all_c2n
 
-    # 目的変数データの取得（セッションストアから）
-    target_df: pd.DataFrame | None = page.session.store.get("target_df")
-    target_cols = None
-    target_c2n: dict[str, str] = {}
-    if target_df is not None and not target_df.empty:
-        target_cols = target_df.columns.tolist()
-        t_defs = get_target_definitions(target_cols)
-        target_c2n = dict(zip(t_defs["target_code"], t_defs["target_name"]))
-        code_to_name.update(target_c2n)
+        # 変数セレクタを再構築
+        columns = indicator_df.columns.tolist() if indicator_df is not None and not indicator_df.empty else []
+        target_cols = target_df.columns.tolist() if target_df is not None and not target_df.empty else None
 
-    # 変数セレクタ
-    selector = VariableSelector(
-        page=page,
-        columns=df.columns.tolist(),
-        show_target=True,
-        show_transform=False,
-        code_to_name=code_to_name,
-        target_columns=target_cols,
-        target_code_to_name=target_c2n,
-    )
+        if not columns:
+            selector_container.controls = [
+                ft.Text("説明変数データがありません。データソースを選択してください。", color=ft.Colors.ORANGE_700)
+            ]
+            selector_ref[0] = None
+            page.update()
+            return
+
+        selector_ref[0] = VariableSelector(
+            page=page,
+            columns=columns,
+            show_target=True,
+            show_transform=False,
+            code_to_name=all_c2n,
+            target_columns=target_cols,
+            target_code_to_name=target_c2n,
+        )
+        selector_container.controls = [selector_ref[0].get_ui()]
+        page.update()
+
+    # データソースセレクタ
+    data_source = DataSourceSelector(page=page, on_data_loaded=on_data_loaded)
 
     # 変換ドロップダウン（全カラム一括）
-    from src.analysis.data_transform import TRANSFORM_METHODS
     transform_dropdown = ft.Dropdown(
         label="データ変換",
         options=[ft.dropdown.Option(key=k, text=v) for k, v in TRANSFORM_METHODS.items()],
@@ -69,6 +80,12 @@ def correlation_page(page: ft.Page) -> ft.Control:
 
     def run_analysis(e):
         """分析実行"""
+        selector = selector_ref[0]
+        if selector is None:
+            result_container.controls = [ft.Text("データソースを選択してください。", color=ft.Colors.RED_700)]
+            page.update()
+            return
+
         target = selector.get_target()
         features = selector.get_selected_features()
 
@@ -80,6 +97,10 @@ def correlation_page(page: ft.Page) -> ft.Control:
             result_container.controls = [ft.Text("説明変数を1つ以上選択してください。", color=ft.Colors.RED_700)]
             page.update()
             return
+
+        df = ind_df_ref[0]
+        target_df = tgt_df_ref[0]
+        c2n = code_to_name_ref[0]
 
         print(f"DEBUG: 相関分析実行 target={target}, features={features}")
         result_container.controls = [ft.ProgressRing()]
@@ -122,7 +143,7 @@ def correlation_page(page: ft.Page) -> ft.Control:
                     ],
                     rows=[
                         ft.DataRow(cells=[
-                            ft.DataCell(ft.Text(code_to_name.get(row["variable"], row["variable"]))),
+                            ft.DataCell(ft.Text(c2n.get(row["variable"], row["variable"]))),
                             ft.DataCell(ft.Text(
                                 f"{row['vif']:.4f}",
                                 color=ft.Colors.RED_700 if row["vif"] > 10 else None,
@@ -157,6 +178,7 @@ def correlation_page(page: ft.Page) -> ft.Control:
         title="② 相関分析",
         purpose="目的変数と説明変数の相関係数を可視化し、多重共線性（VIF）を診断します。強い相関（|r| > 0.6）の変数を選び、VIF < 10 の組み合わせで回帰分析に進みましょう。",
         steps=[
+            "データソース選択で説明変数・目的変数のデータセットとfrequencyを選ぶ（frequencyを揃える）",
             "変数セレクタで目的変数（1つ）と説明変数（複数）を選択する",
             "必要に応じてデータ変換（log・差分等）と標準化を設定する",
             "「分析実行」を押す",
@@ -193,7 +215,8 @@ def correlation_page(page: ft.Page) -> ft.Control:
         controls=[
             _help,
             ft.Text("相関分析", size=24, weight=ft.FontWeight.BOLD),
-            selector.get_ui(),
+            data_source.get_ui(),
+            selector_container,
             ft.Row([transform_dropdown, standardize_switch]),
             ft.ElevatedButton("分析実行", on_click=run_analysis, icon=ft.Icons.ANALYTICS),
             ft.Divider(),

@@ -8,11 +8,10 @@ import pandas as pd
 from components.variable_selector import VariableSelector
 from components.plot_utils import plot_residuals
 from components.help_panel import build_help_panel
+from components.data_source_selector import DataSourceSelector
 from src.analysis.data_transform import transform_per_column
 from src.analysis.regression import fit_ols
 from src.data.indicator_loader import (
-    get_indicator_definitions,
-    get_target_definitions,
     merge_target_and_indicators,
 )
 
@@ -21,34 +20,45 @@ def dynamic_regression_page(page: ft.Page) -> ft.Control:
     """動的回帰タブのUIを構築する"""
     print("DEBUG: 動的回帰ページ構築開始")
 
-    df: pd.DataFrame | None = page.session.store.get("df")
-    if df is None or df.empty:
-        return ft.Text("先にデータ閲覧タブでデータを読み込んでください。", color=ft.Colors.RED_700)
+    # 変数セレクタ（後から構築）
+    selector_container = ft.Column()
+    selector_ref = [None]
+    ind_df_ref = [None]
+    tgt_df_ref = [None]
+    code_to_name_ref = [{}]
 
-    # indicator_code → indicator_name のマッピングを取得
-    defs = get_indicator_definitions(df.columns.tolist())
-    code_to_name: dict[str, str] = dict(zip(defs["indicator_code"], defs["indicator_name"]))
+    def on_data_loaded(indicator_df, target_df, code_to_name, target_c2n):
+        """データソース変更時に変数セレクタを再構築する"""
+        ind_df_ref[0] = indicator_df
+        tgt_df_ref[0] = target_df
+        all_c2n = dict(code_to_name)
+        all_c2n.update(target_c2n)
+        code_to_name_ref[0] = all_c2n
 
-    # 目的変数データの取得（セッションストアから）
-    target_df: pd.DataFrame | None = page.session.store.get("target_df")
-    target_cols = None
-    target_c2n: dict[str, str] = {}
-    if target_df is not None and not target_df.empty:
-        target_cols = target_df.columns.tolist()
-        t_defs = get_target_definitions(target_cols)
-        target_c2n = dict(zip(t_defs["target_code"], t_defs["target_name"]))
-        code_to_name.update(target_c2n)
+        columns = indicator_df.columns.tolist() if indicator_df is not None and not indicator_df.empty else []
+        target_cols = target_df.columns.tolist() if target_df is not None and not target_df.empty else None
 
-    # 変数セレクタ（変数ごとの変換・標準化設定あり）
-    selector = VariableSelector(
-        page=page,
-        columns=df.columns.tolist(),
-        show_target=True,
-        show_transform=True,
-        code_to_name=code_to_name,
-        target_columns=target_cols,
-        target_code_to_name=target_c2n,
-    )
+        if not columns:
+            selector_container.controls = [
+                ft.Text("説明変数データがありません。データソースを選択してください。", color=ft.Colors.ORANGE_700)
+            ]
+            selector_ref[0] = None
+            page.update()
+            return
+
+        selector_ref[0] = VariableSelector(
+            page=page,
+            columns=columns,
+            show_target=True,
+            show_transform=True,
+            code_to_name=all_c2n,
+            target_columns=target_cols,
+            target_code_to_name=target_c2n,
+        )
+        selector_container.controls = [selector_ref[0].get_ui()]
+        page.update()
+
+    data_source = DataSourceSelector(page=page, on_data_loaded=on_data_loaded)
 
     # 変数ごとのラグ設定用コンテナ
     lag_settings_container = ft.Column(spacing=5)
@@ -57,19 +67,23 @@ def dynamic_regression_page(page: ft.Page) -> ft.Control:
     def update_lag_settings():
         """選択された変数に合わせてラグスライダーを表示する"""
         lag_settings_container.controls.clear()
+        selector = selector_ref[0]
+        if selector is None:
+            return
         features = selector.get_selected_features()
+        c2n = code_to_name_ref[0]
         for col in features:
             if col not in lag_values:
                 lag_values[col] = 0
             slider = ft.Slider(
                 min=0, max=12, divisions=12,
                 value=lag_values.get(col, 0),
-                label=f"{code_to_name.get(col, col)}: " + "{value}",
+                label=f"{c2n.get(col, col)}: " + "{value}",
                 width=300,
                 on_change=lambda e, c=col: _on_lag_change(e, c),
             )
             lag_settings_container.controls.append(
-                ft.Row([ft.Text(code_to_name.get(col, col), width=200, size=12), slider])
+                ft.Row([ft.Text(c2n.get(col, col), width=200, size=12), slider])
             )
         page.update()
 
@@ -82,6 +96,12 @@ def dynamic_regression_page(page: ft.Page) -> ft.Control:
         """分析実行"""
         update_lag_settings()
 
+        selector = selector_ref[0]
+        if selector is None:
+            result_container.controls = [ft.Text("データソースを選択してください。", color=ft.Colors.RED_700)]
+            page.update()
+            return
+
         target = selector.get_target()
         features = selector.get_selected_features()
         if not target or not features:
@@ -89,7 +109,11 @@ def dynamic_regression_page(page: ft.Page) -> ft.Control:
             page.update()
             return
 
+        df = ind_df_ref[0]
+        target_df = tgt_df_ref[0]
+        c2n = code_to_name_ref[0]
         settings = selector.get_variable_settings()
+
         print(f"DEBUG: 動的回帰実行 target={target}, features={features}, settings={settings}")
 
         result_container.controls = [ft.ProgressRing()]
@@ -117,11 +141,12 @@ def dynamic_regression_page(page: ft.Page) -> ft.Control:
             results.append(ft.Text("動的回帰結果", size=18, weight=ft.FontWeight.BOLD))
 
             # 変換設定の表示
+            all_cols = [target] + features
             setting_rows = []
-            for col in cols:
+            for col in all_cols:
                 s = settings.get(col, {})
                 setting_rows.append(ft.DataRow(cells=[
-                    ft.DataCell(ft.Text(code_to_name.get(col, col))),
+                    ft.DataCell(ft.Text(c2n.get(col, col))),
                     ft.DataCell(ft.Text(s.get("transform", "none"))),
                     ft.DataCell(ft.Text("✓" if s.get("standardize") else "")),
                     ft.DataCell(ft.Text(str(lag_values.get(col, 0)))),
@@ -162,7 +187,7 @@ def dynamic_regression_page(page: ft.Page) -> ft.Control:
                     ft.DataColumn(ft.Text("p値")),
                 ],
                 rows=[ft.DataRow(cells=[
-                    ft.DataCell(ft.Text(code_to_name.get(row["variable"], row["variable"]))),
+                    ft.DataCell(ft.Text(c2n.get(row["variable"], row["variable"]))),
                     ft.DataCell(ft.Text(f"{row['coef']:.4f}")),
                     ft.DataCell(ft.Text(f"{row['std_err']:.4f}")),
                     ft.DataCell(ft.Text(f"{row['t_stat']:.4f}")),
@@ -190,6 +215,7 @@ def dynamic_regression_page(page: ft.Page) -> ft.Control:
         title="⑤ 動的回帰（変数別設定）",
         purpose="変数ごとに異なるデータ変換・標準化・ラグを個別指定した柔軟な回帰分析を行います。ECLモデルでは「マクロ経済変数が信用損失に影響するまでのタイムラグ」を変数別に設定できます。",
         steps=[
+            "データソース選択で説明変数・目的変数のデータセットとfrequencyを選ぶ（frequencyを揃える）",
             "変数セレクタで目的変数と説明変数を選択する（各変数に変換・標準化を個別設定）",
             "「ラグ設定を更新」を押して変数ごとのラグスライダーを表示する",
             "各変数のラグ期間をスライダーで調整する（例: GDP→2期、失業率→1期）",
@@ -229,7 +255,8 @@ def dynamic_regression_page(page: ft.Page) -> ft.Control:
         controls=[
             _help,
             ft.Text("動的回帰（変数別設定）", size=24, weight=ft.FontWeight.BOLD),
-            selector.get_ui(),
+            data_source.get_ui(),
+            selector_container,
             ft.Text("変数ごとのラグ設定:", size=14, weight=ft.FontWeight.BOLD),
             ft.ElevatedButton("ラグ設定を更新", on_click=lambda e: update_lag_settings()),
             lag_settings_container,

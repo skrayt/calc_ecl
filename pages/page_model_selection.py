@@ -8,9 +8,8 @@ import pandas as pd
 from src.analysis.data_transform import TRANSFORM_METHODS
 from src.analysis.model_selection import search_best_model, filter_models
 from components.help_panel import build_help_panel
+from components.data_source_selector import DataSourceSelector
 from src.data.indicator_loader import (
-    get_indicator_definitions,
-    get_target_definitions,
     merge_target_and_indicators,
 )
 
@@ -19,53 +18,56 @@ def model_selection_page(page: ft.Page) -> ft.Control:
     """モデル選択タブのUIを構築する"""
     print("DEBUG: モデル選択ページ構築開始")
 
-    df: pd.DataFrame | None = page.session.store.get("df")
-    if df is None or df.empty:
-        return ft.Text("先にデータ閲覧タブでデータを読み込んでください。", color=ft.Colors.RED_700)
+    # データ参照用
+    ind_df_ref = [None]
+    tgt_df_ref = [None]
+    code_to_name_ref = [{}]
+    target_c2n_ref = [{}]
 
-    columns = df.columns.tolist()
-
-    # indicator_code → indicator_name のマッピングを取得
-    defs = get_indicator_definitions(columns)
-    code_to_name: dict[str, str] = dict(zip(defs["indicator_code"], defs["indicator_name"]))
-
-    # 目的変数データの取得（セッションストアから）
-    target_df: pd.DataFrame | None = page.session.store.get("target_df")
-    target_cols = None
-    target_c2n: dict[str, str] = {}
-    if target_df is not None and not target_df.empty:
-        target_cols = target_df.columns.tolist()
-        t_defs = get_target_definitions(target_cols)
-        target_c2n = dict(zip(t_defs["target_code"], t_defs["target_name"]))
-        code_to_name.update(target_c2n)
-
-    # 目的変数の選択肢を決定
-    if target_cols:
-        target_options = target_cols
-        target_name_map = target_c2n
-    else:
-        target_options = columns
-        target_name_map = code_to_name
-
-    # UI部品
-    target_dropdown = ft.Dropdown(
-        label="目的変数",
-        options=[ft.dropdown.Option(key=c, text=target_name_map.get(c, c)) for c in target_options],
-        value=target_options[0] if target_options else None,
-        width=300,
-    )
-
+    # UI部品（データソース変更で再構築）
+    target_dropdown = ft.Dropdown(label="目的変数", width=300)
     feature_checkboxes = ft.Column(spacing=2)
-    for col in columns:
-        feature_checkboxes.controls.append(
+
+    def on_data_loaded(indicator_df, target_df, code_to_name, target_c2n):
+        """データソース変更時にUIを再構築する"""
+        ind_df_ref[0] = indicator_df
+        tgt_df_ref[0] = target_df
+        all_c2n = dict(code_to_name)
+        all_c2n.update(target_c2n)
+        code_to_name_ref[0] = all_c2n
+        target_c2n_ref[0] = target_c2n
+
+        columns = indicator_df.columns.tolist() if indicator_df is not None and not indicator_df.empty else []
+        target_cols = target_df.columns.tolist() if target_df is not None and not target_df.empty else None
+
+        # 目的変数ドロップダウン更新
+        if target_cols:
+            target_options = target_cols
+            target_name_map = target_c2n
+        else:
+            target_options = columns
+            target_name_map = code_to_name
+
+        target_dropdown.options = [
+            ft.dropdown.Option(key=c, text=target_name_map.get(c, c)) for c in target_options
+        ]
+        target_dropdown.value = target_options[0] if target_options else None
+
+        # 説明変数チェックボックス更新
+        feature_checkboxes.controls = [
             ft.Checkbox(label=code_to_name.get(col, col), data=col, value=True)
-        )
+            for col in columns
+        ]
+
+        page.update()
+
+    data_source = DataSourceSelector(page=page, on_data_loaded=on_data_loaded)
 
     n_features_input = ft.TextField(
         label="説明変数の数", value="2", width=120,
         keyboard_type=ft.KeyboardType.NUMBER,
     )
-    transform_dropdown = ft.Dropdown(
+    transform_dropdown_ui = ft.Dropdown(
         label="データ変換",
         options=[ft.dropdown.Option(key=k, text=v) for k, v in TRANSFORM_METHODS.items()],
         value="none", width=250,
@@ -94,7 +96,15 @@ def model_selection_page(page: ft.Page) -> ft.Control:
             page.update()
             return
 
-        # 選択された説明変数候補（data属性にindicator_codeを格納）
+        df = ind_df_ref[0]
+        target_df = tgt_df_ref[0]
+        c2n = code_to_name_ref[0]
+
+        if df is None or df.empty:
+            result_container.controls = [ft.Text("説明変数データがありません。", color=ft.Colors.RED_700)]
+            page.update()
+            return
+
         feature_cols = [
             cb.data for cb in feature_checkboxes.controls
             if isinstance(cb, ft.Checkbox) and cb.value and cb.data != target
@@ -129,7 +139,7 @@ def model_selection_page(page: ft.Page) -> ft.Control:
                 target_col=target,
                 feature_cols=feature_cols,
                 n_features=n_feat,
-                transform_method=transform_dropdown.value,
+                transform_method=transform_dropdown_ui.value,
                 do_standardize=standardize_switch.value,
                 lag=int(lag_slider.value),
                 sort_by=sort_dropdown.value,
@@ -163,7 +173,6 @@ def model_selection_page(page: ft.Page) -> ft.Control:
             result_container.controls.append(ft.Text("条件に合うモデルがありません。", italic=True))
             return
 
-        # DataTable
         display_cols = ["features", "r2", "adj_r2", "aic", "bic", "dw", "f_stat", "f_pvalue", "max_vif", "nobs"]
         table = ft.DataTable(
             columns=[ft.DataColumn(ft.Text(c, size=11)) for c in display_cols],
@@ -193,6 +202,7 @@ def model_selection_page(page: ft.Page) -> ft.Control:
         title="④ モデル選択（組み合わせ探索）",
         purpose="説明変数の全組み合わせを自動探索し、AIC・BIC・Adj.R²で最適なモデルを比較します。「VIF < 10 かつ Adj.R² 最大」のモデルが最良候補です。",
         steps=[
+            "データソース選択で説明変数・目的変数のデータセットとfrequencyを選ぶ（frequencyを揃える）",
             "目的変数ドロップダウンで目的変数を選択する",
             "「説明変数候補」チェックボックスで探索対象の変数を選ぶ（5〜10個程度推奨）",
             "「説明変数の個数」で最終モデルに含める変数数を指定する（例：2〜3）",
@@ -231,10 +241,11 @@ def model_selection_page(page: ft.Page) -> ft.Control:
         controls=[
             _help,
             ft.Text("モデル選択（組み合わせ探索）", size=24, weight=ft.FontWeight.BOLD),
+            data_source.get_ui(),
             target_dropdown,
             ft.Text("説明変数候補:", size=14, weight=ft.FontWeight.BOLD),
             ft.Container(content=feature_checkboxes, height=150, border=ft.border.all(1, ft.Colors.GREY_300), border_radius=5, padding=8),
-            ft.Row([n_features_input, transform_dropdown, standardize_switch]),
+            ft.Row([n_features_input, transform_dropdown_ui, standardize_switch]),
             ft.Row([lag_slider, sort_dropdown, vif_filter_switch]),
             progress_bar,
             progress_text,

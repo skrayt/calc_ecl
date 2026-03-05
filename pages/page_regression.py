@@ -8,11 +8,10 @@ import pandas as pd
 from components.variable_selector import VariableSelector
 from components.plot_utils import plot_residuals
 from components.help_panel import build_help_panel
+from components.data_source_selector import DataSourceSelector
 from src.analysis.data_transform import transform, standardize, TRANSFORM_METHODS
 from src.analysis.regression import fit_ols, cross_validate
 from src.data.indicator_loader import (
-    get_indicator_definitions,
-    get_target_definitions,
     merge_target_and_indicators,
 )
 
@@ -21,34 +20,45 @@ def regression_page(page: ft.Page) -> ft.Control:
     """回帰分析タブのUIを構築する"""
     print("DEBUG: 回帰分析ページ構築開始")
 
-    df: pd.DataFrame | None = page.session.store.get("df")
-    if df is None or df.empty:
-        return ft.Text("先にデータ閲覧タブでデータを読み込んでください。", color=ft.Colors.RED_700)
+    # 変数セレクタ（後から構築）
+    selector_container = ft.Column()
+    selector_ref = [None]
+    ind_df_ref = [None]
+    tgt_df_ref = [None]
+    code_to_name_ref = [{}]
 
-    # indicator_code → indicator_name のマッピングを取得
-    defs = get_indicator_definitions(df.columns.tolist())
-    code_to_name: dict[str, str] = dict(zip(defs["indicator_code"], defs["indicator_name"]))
+    def on_data_loaded(indicator_df, target_df, code_to_name, target_c2n):
+        """データソース変更時に変数セレクタを再構築する"""
+        ind_df_ref[0] = indicator_df
+        tgt_df_ref[0] = target_df
+        all_c2n = dict(code_to_name)
+        all_c2n.update(target_c2n)
+        code_to_name_ref[0] = all_c2n
 
-    # 目的変数データの取得（セッションストアから）
-    target_df: pd.DataFrame | None = page.session.store.get("target_df")
-    target_cols = None
-    target_c2n: dict[str, str] = {}
-    if target_df is not None and not target_df.empty:
-        target_cols = target_df.columns.tolist()
-        t_defs = get_target_definitions(target_cols)
-        target_c2n = dict(zip(t_defs["target_code"], t_defs["target_name"]))
-        # 係数テーブル表示用にcode_to_nameにも目的変数名を追加
-        code_to_name.update(target_c2n)
+        columns = indicator_df.columns.tolist() if indicator_df is not None and not indicator_df.empty else []
+        target_cols = target_df.columns.tolist() if target_df is not None and not target_df.empty else None
 
-    selector = VariableSelector(
-        page=page,
-        columns=df.columns.tolist(),
-        show_target=True,
-        show_transform=False,
-        code_to_name=code_to_name,
-        target_columns=target_cols,
-        target_code_to_name=target_c2n,
-    )
+        if not columns:
+            selector_container.controls = [
+                ft.Text("説明変数データがありません。データソースを選択してください。", color=ft.Colors.ORANGE_700)
+            ]
+            selector_ref[0] = None
+            page.update()
+            return
+
+        selector_ref[0] = VariableSelector(
+            page=page,
+            columns=columns,
+            show_target=True,
+            show_transform=False,
+            code_to_name=all_c2n,
+            target_columns=target_cols,
+            target_code_to_name=target_c2n,
+        )
+        selector_container.controls = [selector_ref[0].get_ui()]
+        page.update()
+
+    data_source = DataSourceSelector(page=page, on_data_loaded=on_data_loaded)
 
     transform_dropdown = ft.Dropdown(
         label="データ変換",
@@ -77,12 +87,22 @@ def regression_page(page: ft.Page) -> ft.Control:
 
     def run_analysis(e):
         """分析実行"""
+        selector = selector_ref[0]
+        if selector is None:
+            result_container.controls = [ft.Text("データソースを選択してください。", color=ft.Colors.RED_700)]
+            page.update()
+            return
+
         target = selector.get_target()
         features = selector.get_selected_features()
         if not target or not features:
             result_container.controls = [ft.Text("目的変数と説明変数を選択してください。", color=ft.Colors.RED_700)]
             page.update()
             return
+
+        df = ind_df_ref[0]
+        target_df = tgt_df_ref[0]
+        c2n = code_to_name_ref[0]
 
         print(f"DEBUG: 回帰分析実行 target={target}, features={features}, lag={int(lag_slider.value)}")
         result_container.controls = [ft.ProgressRing()]
@@ -141,7 +161,7 @@ def regression_page(page: ft.Page) -> ft.Control:
                 ],
                 rows=[
                     ft.DataRow(cells=[
-                        ft.DataCell(ft.Text(code_to_name.get(row["variable"], row["variable"]))),
+                        ft.DataCell(ft.Text(c2n.get(row["variable"], row["variable"]))),
                         ft.DataCell(ft.Text(f"{row['coef']:.4f}")),
                         ft.DataCell(ft.Text(f"{row['std_err']:.4f}")),
                         ft.DataCell(ft.Text(f"{row['t_stat']:.4f}")),
@@ -185,6 +205,7 @@ def regression_page(page: ft.Page) -> ft.Control:
         title="③ 回帰分析",
         purpose="OLS（最小二乗法）で回帰モデルを構築し、係数・適合度・残差を評価します。良いモデルの目安: Adj.R² > 0.7、p値 < 0.05（全係数）、Durbin-Watson 1.5〜2.5。",
         steps=[
+            "データソース選択で説明変数・目的変数のデータセットとfrequencyを選ぶ（frequencyを揃える）",
             "変数セレクタで目的変数と説明変数を選択する",
             "データ変換・標準化・ラグ期間（0〜12）を設定する",
             "交差検証の分割数を指定する（デフォルト5）",
@@ -249,7 +270,8 @@ def regression_page(page: ft.Page) -> ft.Control:
         controls=[
             _help,
             ft.Text("回帰分析", size=24, weight=ft.FontWeight.BOLD),
-            selector.get_ui(),
+            data_source.get_ui(),
+            selector_container,
             ft.Row([transform_dropdown, standardize_switch]),
             ft.Row([lag_slider, lag_label, cv_folds_input]),
             ft.ElevatedButton("分析実行", on_click=run_analysis, icon=ft.Icons.ANALYTICS),
