@@ -295,10 +295,10 @@ PYTHONPATH=. python main.py
 | # | タブ | ファイル | 機能 |
 |---|------|---------|------|
 | 1 | データ閲覧 | `pages/page_data_view.py` | データセット選択・テーブル表示・時系列グラフ |
-| 2 | 相関分析 | `pages/page_correlation.py` | 相関行列ヒートマップ・VIF一覧・VIFクロス表 |
-| 3 | 回帰分析 | `pages/page_regression.py` | OLS回帰・係数テーブル・残差プロット・交差検証 |
-| 4 | モデル選択 | `pages/page_model_selection.py` | 全組み合わせ探索・進捗バー・VIFフィルタ |
-| 5 | 動的回帰 | `pages/page_dynamic_regression.py` | 変数別変換・標準化・ラグ設定 |
+| 2 | 相関分析 | `pages/page_correlation.py` | データソース選択・相関行列ヒートマップ・VIF一覧・VIFクロス表 |
+| 3 | 回帰分析 | `pages/page_regression.py` | データソース選択・OLS回帰・係数テーブル・残差プロット・交差検証 |
+| 4 | モデル選択 | `pages/page_model_selection.py` | データソース選択・全組み合わせ探索・進捗バー・VIFフィルタ |
+| 5 | 動的回帰 | `pages/page_dynamic_regression.py` | データソース選択・変数別変換・標準化・ラグ設定 |
 | 6 | ARIMA | `pages/page_arima.py` | ADF検定・ACF/PACF・次数自動選択・予測 |
 | 7 | 将来シナリオ | `pages/page_forecast.py` | シナリオ作成・予測結果保存（実装予定） |
 
@@ -308,6 +308,18 @@ PYTHONPATH=. python main.py
 |---------|------|
 | `components/plot_utils.py` | matplotlib→base64変換、各種プロット関数 |
 | `components/variable_selector.py` | 目的変数・説明変数の選択UIパーツ |
+| `components/data_source_selector.py` | データソース選択UI（データセット・frequency・セグメント） |
+| `components/help_panel.py` | 折りたたみ式ヘルプパネル |
+
+**データソース選択コンポーネント（DataSourceSelector）**:
+
+分析ページ（②相関〜⑤動的回帰）の上部に配置され、説明変数と目的変数のデータソースを統一的に選択する。
+
+- 説明変数: データセット + frequency を選択
+- 目的変数: データセット + frequency + セグメント を選択
+- 目的変数のfrequency変更時、説明変数のfrequencyも自動的に合わせる
+- frequency不一致時は警告メッセージを表示
+- データ変更時にコールバックで変数セレクタ等を再構築する
 
 ### 4.6 config/column_mapping.json — カラムマッピング設定
 
