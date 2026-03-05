@@ -710,36 +710,33 @@ def data_view_page(page: ft.Page) -> ft.Control:
     indicator_tab_content = _build_indicator_tab()
     target_tab_content = _build_target_tab()
 
-    # サブタブ: TabBar + TabBarView 構成（Flet 0.81.0公式API）
-    sub_tabs = ft.Tabs(
-        length=2,
-        selected_index=0,
-        animation_duration=300,
-        content=ft.Column(
-            expand=True,
-            controls=[
-                ft.TabBar(
-                    tabs=[
-                        ft.Tab(label="説明変数データ"),
-                        ft.Tab(label="目的変数データ"),
-                    ],
-                ),
-                ft.TabBarView(
-                    expand=True,
-                    controls=[
-                        ft.Container(content=indicator_tab_content, padding=10),
-                        ft.Container(content=target_tab_content, padding=10),
-                    ],
-                ),
-            ],
-        ),
-    )
+    # サブタブ: ボタン切替（TabBarは親Tabsにイベントがバブルするため不使用）
+    sub_tab_body = ft.Container(content=indicator_tab_content, padding=10)
+
+    btn_indicator = ft.ElevatedButton("説明変数データ", disabled=True)
+    btn_target = ft.OutlinedButton("目的変数データ")
+
+    def switch_to_indicator(e):
+        sub_tab_body.content = indicator_tab_content
+        btn_indicator.disabled = True
+        btn_target.disabled = False
+        page.update()
+
+    def switch_to_target(e):
+        sub_tab_body.content = target_tab_content
+        btn_indicator.disabled = False
+        btn_target.disabled = True
+        page.update()
+
+    btn_indicator.on_click = switch_to_indicator
+    btn_target.on_click = switch_to_target
 
     layout = ft.Column(
         controls=[
             _help,
             ft.Text("データ閲覧・管理", size=24, weight=ft.FontWeight.BOLD),
-            sub_tabs,
+            ft.Row([btn_indicator, btn_target], spacing=8),
+            sub_tab_body,
         ],
         spacing=10,
     )
