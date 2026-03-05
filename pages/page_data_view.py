@@ -71,8 +71,7 @@ def data_view_page(page: ft.Page) -> ft.Control:
             nonlocal prompt_result
             prompt_result = e.control.data
             prompt_event.set()
-            mapping_dialog.open = False
-            page.update()
+            page.close(mapping_dialog)
 
         mapping_dialog = ft.AlertDialog(
             modal=True,
@@ -97,8 +96,7 @@ def data_view_page(page: ft.Page) -> ft.Control:
             )
             new_code_input.value = ""
             prompt_event.clear()
-            mapping_dialog.open = True
-            page.update()
+            page.open(mapping_dialog)
             prompt_event.wait()
             if prompt_result == "add":
                 return {"action": "add", "code": new_code_input.value}
@@ -140,7 +138,6 @@ def data_view_page(page: ft.Page) -> ft.Control:
                 start_import_thread(files[0].path)
 
         file_picker = ft.FilePicker()
-        page.overlay.append(mapping_dialog)
 
         def load_datasets_list():
             try:
@@ -310,7 +307,7 @@ def data_view_page(page: ft.Page) -> ft.Control:
         )
 
         load_datasets_list()
-        return layout, file_picker
+        return layout
 
     # =========================================================
     # 目的変数タブ
@@ -367,8 +364,7 @@ def data_view_page(page: ft.Page) -> ft.Control:
         def on_t_name_dialog_close(e):
             t_name_dialog_result[0] = e.control.data
             t_name_dialog_event.set()
-            t_name_dialog.open = False
-            page.update()
+            page.close(t_name_dialog)
 
         t_name_dialog = ft.AlertDialog(
             modal=True,
@@ -379,7 +375,7 @@ def data_view_page(page: ft.Page) -> ft.Control:
                 ft.TextButton("キャンセル", on_click=on_t_name_dialog_close, data="cancel"),
             ],
         )
-        page.overlay.append(t_name_dialog)
+        # t_name_dialogはpage.open()で表示する
 
         def on_t_import_result(res):
             t_progress_bar.visible = False
@@ -433,8 +429,7 @@ def data_view_page(page: ft.Page) -> ft.Control:
                             t_name_dialog_content.controls.append(tf)
 
                         t_name_dialog_event.clear()
-                        t_name_dialog.open = True
-                        page.update()
+                        page.open(t_name_dialog)
                         t_name_dialog_event.wait()
 
                         if t_name_dialog_result[0] == "cancel":
@@ -674,7 +669,7 @@ def data_view_page(page: ft.Page) -> ft.Control:
         )
 
         load_target_datasets_list()
-        return layout, t_file_picker
+        return layout
 
     # =========================================================
     # ヘルプパネル
@@ -712,29 +707,41 @@ def data_view_page(page: ft.Page) -> ft.Control:
     # =========================================================
     # タブ構成
     # =========================================================
-    indicator_tab_content, indicator_file_picker = _build_indicator_tab()
-    target_tab_content, target_file_picker = _build_target_tab()
+    indicator_tab_content = _build_indicator_tab()
+    target_tab_content = _build_target_tab()
 
-    tabs = ft.Tabs(
+    # サブタブ: TabBar + TabBarView 構成（Flet 0.81.0公式API）
+    sub_tabs = ft.Tabs(
+        length=2,
         selected_index=0,
         animation_duration=300,
-        tabs=[
-            ft.Tab(text="説明変数データ", content=ft.Container(content=indicator_tab_content, padding=10)),
-            ft.Tab(text="目的変数データ", content=ft.Container(content=target_tab_content, padding=10)),
-        ],
+        content=ft.Column(
+            expand=True,
+            controls=[
+                ft.TabBar(
+                    tabs=[
+                        ft.Tab(label="説明変数データ"),
+                        ft.Tab(label="目的変数データ"),
+                    ],
+                ),
+                ft.TabBarView(
+                    expand=True,
+                    controls=[
+                        ft.Container(content=indicator_tab_content, padding=10),
+                        ft.Container(content=target_tab_content, padding=10),
+                    ],
+                ),
+            ],
+        ),
     )
 
     layout = ft.Column(
         controls=[
             _help,
             ft.Text("データ閲覧・管理", size=24, weight=ft.FontWeight.BOLD),
-            tabs,
+            sub_tabs,
         ],
         spacing=10,
     )
-
-    # FilePickerをoverlayに追加
-    page.overlay.append(indicator_file_picker)
-    page.overlay.append(target_file_picker)
 
     return layout
