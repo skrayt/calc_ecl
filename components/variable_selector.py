@@ -21,7 +21,7 @@ class VariableSelector:
     page : ft.Page
         Fletページ
     columns : list[str]
-        選択可能なカラム名リスト
+        選択可能なカラム名リスト（説明変数）
     on_change : callable or None
         変数選択が変更された時のコールバック
     show_target : bool
@@ -30,6 +30,12 @@ class VariableSelector:
         変換設定を表示するかどうか（デフォルト: True）
     initial_target : str or None
         初期選択する目的変数
+    target_columns : list[str] or None
+        目的変数の選択肢リスト。指定時は目的変数ドロップダウンに
+        このリストを使用する（説明変数リストとは別ソース）。
+        Noneの場合はcolumnsから目的変数を選択する（従来動作）。
+    target_code_to_name : dict or None
+        目的変数コード→日本語名のマッピング。target_columns指定時に使用。
     """
 
     def __init__(
@@ -41,6 +47,8 @@ class VariableSelector:
         show_transform: bool = True,
         initial_target: str | None = None,
         code_to_name: dict | None = None,
+        target_columns: list[str] | None = None,
+        target_code_to_name: dict | None = None,
     ):
         self.page = page
         self.columns = list(columns)
@@ -48,17 +56,30 @@ class VariableSelector:
         self.show_target = show_target
         self.show_transform = show_transform
         self.code_to_name: dict[str, str] = code_to_name or {}
+        self.target_columns = list(target_columns) if target_columns else None
+        self.target_code_to_name: dict[str, str] = target_code_to_name or {}
 
-        # 状態管理
-        self._selected: dict[str, bool] = {c: False for c in self.columns}
-        self._transforms: dict[str, str] = {c: "none" for c in self.columns}
-        self._standardize: dict[str, bool] = {c: False for c in self.columns}
+        # 目的変数の選択肢を決定
+        if self.target_columns is not None:
+            # 目的変数は別ソース（target_data）から
+            target_options = self.target_columns
+            target_name_map = self.target_code_to_name
+        else:
+            # 従来動作: 説明変数リストから目的変数を選択
+            target_options = self.columns
+            target_name_map = self.code_to_name
+
+        # 状態管理（説明変数 + 目的変数すべてのカラムを管理）
+        all_columns = self.columns + (self.target_columns or [])
+        self._selected: dict[str, bool] = {c: False for c in all_columns}
+        self._transforms: dict[str, str] = {c: "none" for c in all_columns}
+        self._standardize: dict[str, bool] = {c: False for c in all_columns}
 
         # UIコンポーネント初期化
         self._target_dropdown = ft.Dropdown(
             label="目的変数",
-            options=[ft.dropdown.Option(key=c, text=self.code_to_name.get(c, c)) for c in self.columns],
-            value=initial_target or (self.columns[0] if self.columns else None),
+            options=[ft.dropdown.Option(key=c, text=target_name_map.get(c, c)) for c in target_options],
+            value=initial_target or (target_options[0] if target_options else None),
             on_select=self._on_target_change,
             width=300,
         )
@@ -73,7 +94,9 @@ class VariableSelector:
         target = self._target_dropdown.value
 
         for col in self.columns:
-            if col == target:
+            # target_columnsが別ソースの場合、columnsの全項目を説明変数候補として表示
+            # target_columnsがNoneの場合のみ、目的変数と同じ列を除外（従来動作）
+            if self.target_columns is None and col == target:
                 continue
 
             row_controls = []
@@ -150,7 +173,7 @@ class VariableSelector:
         target = self.get_target()
         return [
             c for c in self.columns
-            if self._selected.get(c, False) and c != target
+            if self._selected.get(c, False) and (self.target_columns is not None or c != target)
         ]
 
     def get_variable_settings(self) -> dict[str, dict]:

@@ -10,7 +10,11 @@ from components.plot_utils import plot_residuals
 from components.help_panel import build_help_panel
 from src.analysis.data_transform import transform_per_column
 from src.analysis.regression import fit_ols
-from src.data.indicator_loader import get_indicator_definitions
+from src.data.indicator_loader import (
+    get_indicator_definitions,
+    get_target_definitions,
+    merge_target_and_indicators,
+)
 
 
 def dynamic_regression_page(page: ft.Page) -> ft.Control:
@@ -25,6 +29,16 @@ def dynamic_regression_page(page: ft.Page) -> ft.Control:
     defs = get_indicator_definitions(df.columns.tolist())
     code_to_name: dict[str, str] = dict(zip(defs["indicator_code"], defs["indicator_name"]))
 
+    # 目的変数データの取得（セッションストアから）
+    target_df: pd.DataFrame | None = page.session.store.get("target_df")
+    target_cols = None
+    target_c2n: dict[str, str] = {}
+    if target_df is not None and not target_df.empty:
+        target_cols = target_df.columns.tolist()
+        t_defs = get_target_definitions(target_cols)
+        target_c2n = dict(zip(t_defs["target_code"], t_defs["target_name"]))
+        code_to_name.update(target_c2n)
+
     # 変数セレクタ（変数ごとの変換・標準化設定あり）
     selector = VariableSelector(
         page=page,
@@ -32,6 +46,8 @@ def dynamic_regression_page(page: ft.Page) -> ft.Control:
         show_target=True,
         show_transform=True,
         code_to_name=code_to_name,
+        target_columns=target_cols,
+        target_code_to_name=target_c2n,
     )
 
     # 変数ごとのラグ設定用コンテナ
@@ -80,9 +96,14 @@ def dynamic_regression_page(page: ft.Page) -> ft.Control:
         page.update()
 
         try:
+            # 目的変数が別ソース（target_data）の場合はマージ
+            if target_df is not None and not target_df.empty and target in target_df.columns:
+                base_df = merge_target_and_indicators(target_df, df[features], target)
+            else:
+                cols = [target] + features
+                base_df = df[cols].copy()
             # 変数ごとの個別変換
-            cols = [target] + features
-            work_df = transform_per_column(df[cols], settings)
+            work_df = transform_per_column(base_df, settings)
 
             y = work_df[target]
             X = work_df[features]

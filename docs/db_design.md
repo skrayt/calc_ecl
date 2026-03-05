@@ -6,7 +6,8 @@ IFRS9/予想信用損失(ECL)モデルの将来予想に使用するマクロ経
 モデル設定・実行結果・将来シナリオを管理するためのデータベース設計。
 
 - **DBMS**: PostgreSQL 15
-- **DDLファイル**: `db/migrations/001_create_tables.sql`
+- **DDLファイル**: `db/migrations/001_create_tables.sql`（説明変数・モデル）
+- **DDLファイル**: `db/migrations/002_create_target_tables.sql`（目的変数）
 
 ---
 
@@ -18,30 +19,35 @@ IFRS9/予想信用損失(ECL)モデルの将来予想に使用するマクロ経
 | 基準年改定への対応 | 指標定義マスタで基準年を管理。改定時は新しい指標コードとして登録 |
 | データ取得時期の管理 | データセット単位で取得時期を管理し、モデル作成時のデータ再現性を担保 |
 | IFRS9シナリオ対応 | ベース/楽観/悲観シナリオの加重平均でECLを算出する構造 |
+| 説明変数と目的変数の分離 | 説明変数（indicator_*）と目的変数（target_*）は対称的だが独立したテーブル群で管理 |
 
 ---
 
 ## ER図
 
 ```
+【説明変数（マクロ経済指標）】          【目的変数（PD/LGD/EAD）】
+
 indicator_sources（データソース）
         │
-        ▼
+        ▼                              target_definitions（目的変数定義マスタ）
 indicator_definitions（指標定義マスタ）
-        │
-        │          indicator_datasets（データセット = 取得回）
-        │                    │
-        ▼                    ▼
-              indicator_data（指標データ本体 / JSONB）
-                             │
-                             │
-              model_configs（モデル設定）
-                             │
-                             ▼
-              model_results（モデル実行結果）
-                             │
-                             ▼
-              forecast_scenarios（将来シナリオ・予測値）
+        │                              target_datasets（目的変数データセット）
+        │                                        │
+indicator_datasets（データセット=取得回）         │
+        │                                        ▼
+        ▼                              target_data（目的変数データ本体 / JSONB）
+indicator_data（指標データ本体 / JSONB）          │
+        │                                        │
+        │            ┌───────────────────────────┘
+        ▼            ▼
+       model_configs（モデル設定）← dataset_id + target_dataset_id
+                     │
+                     ▼
+       model_results（モデル実行結果）
+                     │
+                     ▼
+       forecast_scenarios（将来シナリオ・予測値）
 ```
 
 ---
@@ -57,6 +63,9 @@ indicator_definitions（指標定義マスタ）
 | 5 | model_configs | モデル | モデル設定（使用データセット・説明変数） |
 | 6 | model_results | モデル | モデル学習・評価の実行結果 |
 | 7 | forecast_scenarios | モデル | 将来シナリオと予測値 |
+| 8 | target_definitions | マスタ | 目的変数定義（PD/LGD/EAD） |
+| 9 | target_datasets | 管理 | 目的変数データ取得回 |
+| 10 | target_data | データ | 目的変数データ本体（JSONB格納） |
 
 ---
 
@@ -256,21 +265,105 @@ IFRS9準拠のベース/楽観/悲観シナリオと予測値を管理する。
 
 ---
 
+### 8. target_definitions（目的変数定義マスタ）
+
+PD（デフォルト率）・LGD（損失率）・EAD（エクスポージャー）等の目的変数を定義する。
+
+| カラム | 型 | 必須 | 説明 |
+|--------|-----|------|------|
+| target_id | SERIAL | PK | |
+| target_code | VARCHAR(50) | o | 目的変数コード（ユニーク） |
+| target_name | VARCHAR(200) | o | 日本語名（例: 法人PD） |
+| target_type | VARCHAR(20) | o | pd / lgd / ead（CHECK制約） |
+| unit | VARCHAR(50) | | 単位（例: %） |
+| frequency | VARCHAR(20) | o | データ粒度 |
+| description | TEXT | | 備考 |
+| created_at | TIMESTAMPTZ | | 作成日時 |
+
+---
+
+### 9. target_datasets（目的変数データセット管理）
+
+目的変数のデータ取得回を管理する。indicator_datasetsと対称的な構造。
+
+| カラム | 型 | 必須 | 説明 |
+|--------|-----|------|------|
+| target_dataset_id | SERIAL | PK | |
+| dataset_name | VARCHAR(200) | o | 例: '2026年3月 法人PD実績' |
+| retrieved_at | DATE | o | データ取得日 |
+| target_keys | JSONB | o | 含有目的変数コード配列 |
+| description | TEXT | | 備考 |
+| is_active | BOOLEAN | | デフォルトTRUE |
+| created_at | TIMESTAMPTZ | | 作成日時 |
+
+---
+
+### 10. target_data（目的変数データ本体）
+
+JSONB型で目的変数値を格納する。indicator_dataのregion_codeに対応するsegment_codeでセグメント（法人/個人等）を区分する。
+
+| カラム | 型 | 必須 | 説明 |
+|--------|-----|------|------|
+| data_id | BIGSERIAL | PK | |
+| target_dataset_id | INTEGER | o | FK → target_datasets |
+| reference_date | DATE | o | 基準日（indicator_dataと同じルール） |
+| frequency | VARCHAR(20) | o | データ粒度 |
+| segment_code | VARCHAR(50) | o | セグメントコード（デフォルト'all'） |
+| segment_name | VARCHAR(100) | | セグメント名 |
+| targets | JSONB | o | 目的変数値 |
+| notes | JSONB | | 注記 |
+| imported_at | TIMESTAMPTZ | | インポート日時 |
+
+**ユニーク制約**: `(target_dataset_id, reference_date, frequency, segment_code)`
+
+#### targets カラムの格納イメージ
+
+```json
+// 年度データ（2022年度・法人セグメント）
+{
+  "pd_corporate": 0.0234,
+  "lgd_corporate": 0.45
+}
+```
+
+#### インデックス
+
+| インデックス名 | 対象 | 種別 |
+|---------------|------|------|
+| idx_target_data_targets | targets | GIN（JSONB検索用） |
+| idx_target_data_date | reference_date | B-tree |
+| idx_target_data_dataset | target_dataset_id | B-tree |
+| idx_target_data_freq_seg | (frequency, segment_code) | B-tree |
+
+---
+
+### model_configs への追加カラム
+
+| カラム | 型 | 必須 | 説明 |
+|--------|-----|------|------|
+| target_dataset_id | INTEGER | | FK → target_datasets。目的変数データとの紐付け |
+
+---
+
 ## データの流れ
 
 ```
-1. 統計ダッシュボードからCSVダウンロード
-        ↓
-2. indicator_datasets に取得回を登録
-        ↓
-3. CSVをパースして indicator_data へINSERT（JSONB格納）
-        ↓
-4. model_configs でモデル設定を定義（dataset_id で紐付け）
-        ↓
+【説明変数】                              【目的変数】
+1. 統計ダッシュボードからCSVダウンロード   1. PD/LGD実績データをCSV準備
+        ↓                                        ↓
+2. indicator_datasets に取得回を登録       2. target_datasets に取得回を登録
+        ↓                                        ↓
+3. CSVパース→indicator_dataへINSERT        3. CSVパース→target_dataへINSERT
+        ↓                                        ↓
+        └────────────┬───────────────────────────┘
+                     ↓
+4. model_configs でモデル設定を定義
+   （dataset_id + target_dataset_id で紐付け）
+                     ↓
 5. Python でモデル学習 → model_results に結果保存
-        ↓
+                     ↓
 6. シナリオ別に将来予測 → forecast_scenarios に保存
-        ↓
+                     ↓
 7. 加重平均でECL算出
 ```
 

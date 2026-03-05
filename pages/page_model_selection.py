@@ -8,7 +8,11 @@ import pandas as pd
 from src.analysis.data_transform import TRANSFORM_METHODS
 from src.analysis.model_selection import search_best_model, filter_models
 from components.help_panel import build_help_panel
-from src.data.indicator_loader import get_indicator_definitions
+from src.data.indicator_loader import (
+    get_indicator_definitions,
+    get_target_definitions,
+    merge_target_and_indicators,
+)
 
 
 def model_selection_page(page: ft.Page) -> ft.Control:
@@ -25,11 +29,29 @@ def model_selection_page(page: ft.Page) -> ft.Control:
     defs = get_indicator_definitions(columns)
     code_to_name: dict[str, str] = dict(zip(defs["indicator_code"], defs["indicator_name"]))
 
+    # 目的変数データの取得（セッションストアから）
+    target_df: pd.DataFrame | None = page.session.store.get("target_df")
+    target_cols = None
+    target_c2n: dict[str, str] = {}
+    if target_df is not None and not target_df.empty:
+        target_cols = target_df.columns.tolist()
+        t_defs = get_target_definitions(target_cols)
+        target_c2n = dict(zip(t_defs["target_code"], t_defs["target_name"]))
+        code_to_name.update(target_c2n)
+
+    # 目的変数の選択肢を決定
+    if target_cols:
+        target_options = target_cols
+        target_name_map = target_c2n
+    else:
+        target_options = columns
+        target_name_map = code_to_name
+
     # UI部品
     target_dropdown = ft.Dropdown(
         label="目的変数",
-        options=[ft.dropdown.Option(key=c, text=code_to_name.get(c, c)) for c in columns],
-        value=columns[0] if columns else None,
+        options=[ft.dropdown.Option(key=c, text=target_name_map.get(c, c)) for c in target_options],
+        value=target_options[0] if target_options else None,
         width=300,
     )
 
@@ -96,8 +118,14 @@ def model_selection_page(page: ft.Page) -> ft.Control:
             page.update()
 
         try:
+            # 目的変数が別ソース（target_data）の場合はマージ
+            if target_df is not None and not target_df.empty and target in target_df.columns:
+                analysis_df = merge_target_and_indicators(target_df, df[feature_cols], target)
+            else:
+                analysis_df = df
+
             results_df = search_best_model(
-                df=df,
+                df=analysis_df,
                 target_col=target,
                 feature_cols=feature_cols,
                 n_features=n_feat,

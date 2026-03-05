@@ -43,9 +43,10 @@ calc_ecl/
 │   ├── db.ini.example        ← 接続情報テンプレート
 │   └── db.ini                ← 実際の接続情報（Git管理外）
 ├── src/
-│   ├── import_indicators.py  ← CSVインポートスクリプト
+│   ├── import_indicators.py  ← 説明変数CSVインポートスクリプト
+│   ├── import_targets.py     ← 目的変数CSVインポートスクリプト
 │   ├── data/
-│   │   └── indicator_loader.py ← DBからの指標データ読み込み
+│   │   └── indicator_loader.py ← DBからの指標・目的変数データ読み込み
 │   └── analysis/             ← 統計分析コアモジュール（UI非依存）
 │       ├── data_transform.py ← データ変換・標準化
 │       ├── correlation.py    ← 相関行列・VIF
@@ -171,15 +172,50 @@ python src/import_indicators.py <CSVパス> [--retrieved-at YYYY-MM-DD]
 
 **重複処理**: 同一キー `(dataset_id, reference_date, frequency, region_code)` の行は `ON CONFLICT` でJSONBをマージする。
 
-### 4.3 src/data/indicator_loader.py — 指標データ読み込み
+### 4.2.1 src/import_targets.py — 目的変数CSVインポート
 
-DBから指標データをpandas DataFrameとして読み込む。
+目的変数（PD/LGD/EAD）のCSVをパースしてDBにインポートする。
+
+**実行方法**:
+```bash
+python src/import_targets.py <CSVパス> --target-type pd [--dataset-name "名前"] [--retrieved-at YYYY-MM-DD]
+```
+
+**CSVフォーマット**:
+```csv
+時点,セグメントコード,セグメント名,pd_corporate,lgd_corporate
+2020年度,corporate,法人,0.0234,0.45
+```
+- 時点列（必須）: 説明変数CSVと同じ形式
+- セグメントコード列/セグメント名列（任意）: 省略時は `all/全体`
+- その他の数値列: カラム名がそのまま `target_code` になる
+
+**処理フロー**:
+1. CSV読み込み → 時点列・セグメント列・数値列を自動識別
+2. `target_definitions` に目的変数定義を登録（未登録の場合）
+3. `target_datasets` にデータセットを登録
+4. CSVの各行をパースし、`target_data` へINSERT
+
+**重複処理**: 同一キー `(target_dataset_id, reference_date, frequency, segment_code)` の行は `ON CONFLICT` でJSONBをマージする。
+
+### 4.3 src/data/indicator_loader.py — 指標・目的変数データ読み込み
+
+DBから指標データ・目的変数データをpandas DataFrameとして読み込む。
 
 ```python
-from src.data.indicator_loader import load_indicators, list_datasets
+from src.data.indicator_loader import load_indicators, load_targets, merge_target_and_indicators
 
+# 説明変数
 df = load_indicators(dataset_id=1, frequency="monthly")
+
+# 目的変数
+target_df = load_targets(target_dataset_id=1, frequency="fiscal_year")
+
+# 結合
+merged = merge_target_and_indicators(target_df, df, "pd_corporate")
 ```
+
+**説明変数用関数**:
 
 | 関数 | 説明 |
 |------|------|
@@ -188,6 +224,17 @@ df = load_indicators(dataset_id=1, frequency="monthly")
 | `load_indicators(dataset_id, frequency)` | 指標データをDatetimeIndex付きDataFrameで返す |
 | `get_indicator_definitions(codes)` | 指標定義マスタを取得 |
 | `load_dataset_summary(dataset_id)` | データセットの概要情報を取得 |
+
+**目的変数用関数**:
+
+| 関数 | 説明 |
+|------|------|
+| `list_target_datasets()` | 目的変数データセット一覧を取得 |
+| `list_target_frequencies(target_dataset_id)` | 目的変数データセットのfrequency一覧 |
+| `list_target_segments(target_dataset_id, frequency)` | セグメント一覧を取得 |
+| `load_targets(target_dataset_id, frequency, segment_code)` | 目的変数DataFrameを返す |
+| `get_target_definitions(codes)` | 目的変数定義マスタを取得 |
+| `merge_target_and_indicators(target_df, indicator_df, target_code)` | 目的変数と説明変数をreference_dateで内部結合 |
 
 ### 4.4 src/analysis/ — 統計分析コアモジュール
 

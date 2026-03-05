@@ -264,6 +264,231 @@ def load_dataset_summary(dataset_id: int) -> dict:
 
 
 # ============================================================
+# 目的変数（PD/LGD/EAD）データ取得
+# ============================================================
+def list_target_datasets(active_only: bool = True) -> pd.DataFrame:
+    """target_datasetsの一覧を返す
+
+    Parameters
+    ----------
+    active_only : bool
+        Trueの場合、is_active=TRUEのデータセットのみ返す
+
+    Returns
+    -------
+    pd.DataFrame
+        カラム: target_dataset_id, dataset_name, retrieved_at,
+                target_keys, description, is_active, created_at
+    """
+    query = """
+        SELECT target_dataset_id, dataset_name, retrieved_at,
+               target_keys, description, is_active, created_at
+        FROM target_datasets
+    """
+    if active_only:
+        query += " WHERE is_active = TRUE"
+    query += " ORDER BY retrieved_at DESC, target_dataset_id DESC"
+
+    conn = get_connection()
+    try:
+        df = pd.read_sql(query, conn)
+        if not df.empty:
+            df["target_keys"] = df["target_keys"].apply(
+                lambda v: json.loads(v) if isinstance(v, str) else v
+            )
+        return df
+    finally:
+        conn.close()
+
+
+def list_target_frequencies(target_dataset_id: int) -> list[str]:
+    """指定目的変数データセットに含まれるfrequencyの一覧を返す
+
+    Parameters
+    ----------
+    target_dataset_id : int
+        目的変数データセットID
+
+    Returns
+    -------
+    list[str]
+        frequency値のリスト
+    """
+    query = """
+        SELECT DISTINCT frequency
+        FROM target_data
+        WHERE target_dataset_id = %s
+        ORDER BY frequency
+    """
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(query, (target_dataset_id,))
+            return [row[0] for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def list_target_segments(target_dataset_id: int, frequency: str) -> list[dict]:
+    """指定データセット・粒度のセグメント一覧を返す
+
+    Returns
+    -------
+    list[dict]
+        [{"segment_code": "all", "segment_name": "全体"}, ...]
+    """
+    query = """
+        SELECT DISTINCT segment_code, segment_name
+        FROM target_data
+        WHERE target_dataset_id = %s AND frequency = %s
+        ORDER BY segment_code
+    """
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(query, (target_dataset_id, frequency))
+            return [
+                {"segment_code": row[0], "segment_name": row[1] or row[0]}
+                for row in cur.fetchall()
+            ]
+    finally:
+        conn.close()
+
+
+def load_targets(
+    target_dataset_id: int,
+    frequency: str,
+    segment_code: str = "all",
+    target_codes: list[str] | None = None,
+) -> pd.DataFrame:
+    """目的変数データをDataFrame化する
+
+    Parameters
+    ----------
+    target_dataset_id : int
+        目的変数データセットID
+    frequency : str
+        時系列粒度
+    segment_code : str
+        セグメントコード（デフォルト: 'all'）
+    target_codes : list[str] | None
+        取得する目的変数コードのリスト。Noneの場合は全目的変数を取得
+
+    Returns
+    -------
+    pd.DataFrame
+        インデックス: reference_date（DatetimeIndex）
+        カラム: 各目的変数コード（例: pd_corporate, lgd_corporate）
+    """
+    query = """
+        SELECT reference_date, targets
+        FROM target_data
+        WHERE target_dataset_id = %s
+          AND frequency = %s
+          AND segment_code = %s
+        ORDER BY reference_date
+    """
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(query, (target_dataset_id, frequency, segment_code))
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    if not rows:
+        return pd.DataFrame()
+
+    records = []
+    for ref_date, targets_raw in rows:
+        if isinstance(targets_raw, str):
+            targets_raw = json.loads(targets_raw)
+        record = {"reference_date": ref_date}
+        record.update(targets_raw)
+        records.append(record)
+
+    df = pd.DataFrame(records)
+    df["reference_date"] = pd.to_datetime(df["reference_date"])
+    df = df.set_index("reference_date").sort_index()
+    df = df.apply(pd.to_numeric, errors="coerce")
+
+    if target_codes is not None:
+        existing = [c for c in target_codes if c in df.columns]
+        df = df[existing]
+
+    return df
+
+
+def get_target_definitions(
+    target_codes: list[str] | None = None,
+) -> pd.DataFrame:
+    """目的変数定義マスタを取得する
+
+    Returns
+    -------
+    pd.DataFrame
+        カラム: target_id, target_code, target_name, target_type, unit, frequency
+    """
+    query = """
+        SELECT target_id, target_code, target_name,
+               target_type, unit, frequency
+        FROM target_definitions
+    """
+    params = None
+    if target_codes is not None:
+        placeholders = ", ".join(["%s"] * len(target_codes))
+        query += f" WHERE target_code IN ({placeholders})"
+        params = tuple(target_codes)
+
+    query += " ORDER BY target_code"
+
+    conn = get_connection()
+    try:
+        df = pd.read_sql(query, conn, params=params)
+        return df
+    finally:
+        conn.close()
+
+
+def merge_target_and_indicators(
+    target_df: pd.DataFrame,
+    indicator_df: pd.DataFrame,
+    target_code: str,
+) -> pd.DataFrame:
+    """目的変数と説明変数をreference_dateで内部結合する
+
+    Parameters
+    ----------
+    target_df : pd.DataFrame
+        目的変数DataFrame（index=reference_date）
+    indicator_df : pd.DataFrame
+        説明変数DataFrame（index=reference_date）
+    target_code : str
+        使用する目的変数コード（target_dfのカラム名）
+
+    Returns
+    -------
+    pd.DataFrame
+        インデックス: reference_date
+        カラム: [target_code] + [説明変数コード群]
+    """
+    if target_code not in target_df.columns:
+        raise ValueError(f"目的変数 '{target_code}' がデータに存在しません")
+
+    # 目的変数の1列だけを取り出して結合
+    target_series = target_df[[target_code]]
+    merged = target_series.join(indicator_df, how="inner")
+
+    if merged.empty:
+        raise ValueError(
+            "目的変数と説明変数の期間が重なりません。"
+            "同じfrequencyのデータを選択してください。"
+        )
+
+    return merged
+
+
+# ============================================================
 # テスト用エントリポイント
 # ============================================================
 if __name__ == "__main__":
