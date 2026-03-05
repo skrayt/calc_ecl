@@ -14,7 +14,7 @@ from src.data.indicator_loader import (
     load_indicators,
     get_indicator_definitions,
 )
-from components.plot_utils import plot_time_series, plot_time_series_grid
+from components.plot_utils import plot_single_series
 from src.import_indicators import import_csv_gui
 from components.help_panel import build_help_panel
 
@@ -275,7 +275,7 @@ def data_view_page(page: ft.Page) -> ft.Control:
         def _fmt(val, col):
             if pd.isna(val):
                 return "-"
-            return f"{int(val):,}" if is_int[col] else f"{val:.2f}"
+            return f"{int(val):,}" if is_int[col] else f"{val:,.2f}"
 
         # データ行
         data_rows = []
@@ -301,30 +301,62 @@ def data_view_page(page: ft.Page) -> ft.Control:
 
     def on_plot_click():
         selected_cols = [cb.data for cb in indicator_checkboxes.controls if cb.value]
-        if not selected_cols: return
+        if not selected_cols:
+            return
         plot_container.controls.clear()
-        try:
-            img = plot_time_series(current_df, selected_cols) if len(selected_cols) <= 3 else plot_time_series_grid(current_df, selected_cols)
-            plot_container.controls.append(ft.Image(src="data:image/png;base64," + img, fit=ft.BoxFit.CONTAIN))
-        except Exception as ex:
-            plot_container.controls.append(ft.Text(f"エラー: {ex}", color=ft.Colors.RED_700))
+
+        N_COLS = 3
+        row_controls = []
+        for i, col in enumerate(selected_cols):
+            label = code_to_name.get(col, col)
+            try:
+                img = plot_single_series(current_df, col, label=label, figsize=(5, 3))
+                cell = ft.Image(src="data:image/png;base64," + img, fit=ft.BoxFit.CONTAIN, expand=True)
+            except Exception as ex:
+                cell = ft.Text(f"{label}: エラー: {ex}", color=ft.Colors.RED_700, expand=True)
+            row_controls.append(cell)
+
+            if len(row_controls) == N_COLS:
+                plot_container.controls.append(ft.Row(controls=row_controls, spacing=4))
+                row_controls = []
+
+        # 端数（列が埋まらない行）
+        if row_controls:
+            # 空セルで埋めてレイアウトを揃える
+            while len(row_controls) < N_COLS:
+                row_controls.append(ft.Container(expand=True))
+            plot_container.controls.append(ft.Row(controls=row_controls, spacing=4))
+
         page.update()
 
     # == レイアウト ==
     _help = build_help_panel(
         title="① データ閲覧・管理",
-        purpose="DBに格納されたマクロ経済指標データを閲覧・グラフ表示し、新しいCSVファイルをインポートします。",
+        purpose="DBに格納されたマクロ経済指標データを閲覧・グラフ表示し、新しいCSVファイルをインポートします。まず最初にこのページでデータを確認し、分析対象のデータセットを把握してください。",
         steps=[
             "データセットドロップダウンで対象データセットを選択する",
             "frequencyドロップダウンで粒度（月次・四半期・年度等）を選択する",
             "チェックボックスで表示したい指標を選び、「選択した指標をプロット」を押す",
+            "グラフで欠損・外れ値・トレンドの有無を目視確認する（分析前の必須ステップ）",
             "新しいデータを取り込む場合は「新規CSVインポート」でCSVファイルを選択する",
         ],
         outputs=[
             "データセットの期間・行数・ID（ステータス表示）",
             "最新データの先頭20行（日付 + 指標値のテーブル）",
-            "選択した指標の時系列グラフ（1〜3個は1図、4個以上はグリッド）",
+            "選択した指標の時系列グラフ（指標ごとに個別の図を表示）",
             "インポート進捗バーと完了メッセージ",
+        ],
+        indicators=[
+            {
+                "name": "分析前のデータ確認チェックリスト",
+                "criteria": [
+                    {"level": "良好",  "range": "欠損値なし",       "meaning": "テーブルに空白・NaNがないことを確認。欠損があると分析でエラーになる場合がある"},
+                    {"level": "注意",  "range": "外れ値を目視確認", "meaning": "グラフで突出した値があれば、統計的ミス入力か実際の異常値かを業務的に判断する"},
+                    {"level": "情報",  "range": "トレンドの確認",   "meaning": "右上がり/右下がりのトレンドがある変数は非定常の可能性。ARIMA分析で確認推奨"},
+                    {"level": "情報",  "range": "frequency（粒度）の統一", "meaning": "月次・四半期・年度で粒度が混在していると相関分析で誤差が生じる。同一粒度で揃えること"},
+                ],
+                "note": "CSVインポート後はデータセットIDが新たに発行される。同じ指標でも複数バージョンが存在する場合は最新のものを使用すること",
+            },
         ],
     )
     layout = ft.Column(

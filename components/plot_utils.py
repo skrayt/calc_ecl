@@ -73,6 +73,44 @@ def fig_to_base64(fig: plt.Figure, dpi: int = 100) -> str:
     return img_base64
 
 
+def plot_single_series(
+    df: pd.DataFrame,
+    col: str,
+    label: str | None = None,
+    figsize: tuple = DEFAULT_FIGSIZE,
+) -> str:
+    """単一カラムの時系列プロット
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DatetimeIndexのDataFrame
+    col : str
+        プロットするカラム名
+    label : str | None
+        凡例・タイトルに使う表示名。None のときは col をそのまま使う
+    figsize : tuple
+        グラフサイズ
+
+    Returns
+    -------
+    str
+        base64エンコードされたPNG画像
+    """
+    display = label or col
+    fig, ax = plt.subplots(figsize=figsize)
+    if col in df.columns and pd.api.types.is_numeric_dtype(df[col]):
+        ax.plot(df.index, df[col], color="steelblue")
+    ax.set_title(display, fontsize=13)
+    ax.set_xlabel("日付", fontsize=10)
+    ax.set_ylabel("値", fontsize=10)
+    ax.tick_params(axis="x", rotation=45, labelsize=8)
+    ax.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda x, _: f"{x:,.2f}".rstrip("0").rstrip(".")))
+    ax.grid(True, linestyle="--", alpha=0.7)
+    fig.tight_layout()
+    return fig_to_base64(fig)
+
+
 def plot_time_series(
     df: pd.DataFrame,
     columns: list[str],

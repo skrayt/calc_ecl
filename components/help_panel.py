@@ -5,11 +5,22 @@
 import flet as ft
 
 
+def _badge(text: str, color: str, bg: str) -> ft.Container:
+    """色付きバッジを生成する"""
+    return ft.Container(
+        content=ft.Text(text, size=11, color=color, weight=ft.FontWeight.BOLD),
+        bgcolor=bg,
+        border_radius=4,
+        padding=ft.padding.symmetric(horizontal=6, vertical=2),
+    )
+
+
 def build_help_panel(
     title: str,
     purpose: str,
     steps: list[str],
     outputs: list[str],
+    indicators: list[dict] | None = None,
 ) -> ft.Control:
     """折りたたみ式ヘルプパネルを構築する。
 
@@ -18,12 +29,20 @@ def build_help_panel(
         purpose: このページの目的（1〜2文）
         steps: 操作手順のリスト
         outputs: 表示される結果・出力のリスト
+        indicators: 統計指標の解説リスト。各要素は以下のキーを持つ dict:
+            - name (str): 指標名
+            - criteria (list[dict]): 判定基準のリスト
+                - level (str): "良好" / "注意" / "危険" 等
+                - range (str): 数値基準（例: "p < 0.05"）
+                - meaning (str): 解釈説明
+            - note (str, optional): 補足説明
 
     Returns:
         折りたたみ可能なヘルプパネル
     """
     is_expanded = [False]
 
+    # --- 操作手順 ---
     step_items = [
         ft.Row(
             controls=[
@@ -35,6 +54,7 @@ def build_help_panel(
         for i, step in enumerate(steps)
     ]
 
+    # --- 表示される結果 ---
     output_items = [
         ft.Row(
             controls=[
@@ -46,6 +66,62 @@ def build_help_panel(
         for output in outputs
     ]
 
+    # --- 指標解説セクション ---
+    LEVEL_COLORS = {
+        "良好":  (ft.Colors.GREEN_800,  ft.Colors.GREEN_50),
+        "注意":  (ft.Colors.ORANGE_800, ft.Colors.ORANGE_50),
+        "危険":  (ft.Colors.RED_800,    ft.Colors.RED_50),
+        "情報":  (ft.Colors.BLUE_800,   ft.Colors.BLUE_50),
+    }
+
+    def _make_indicator_card(ind: dict) -> ft.Container:
+        rows = []
+        for c in ind.get("criteria", []):
+            level = c.get("level", "情報")
+            color, bg = LEVEL_COLORS.get(level, (ft.Colors.GREY_800, ft.Colors.GREY_50))
+            rows.append(
+                ft.Row(
+                    controls=[
+                        _badge(level, color, bg),
+                        ft.Text(c["range"], size=12, weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_900, width=140),
+                        ft.Text(c["meaning"], size=12, color=ft.Colors.GREY_800, expand=True),
+                    ],
+                    spacing=8,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                )
+            )
+        note_row = []
+        if ind.get("note"):
+            note_row = [
+                ft.Text(f"※ {ind['note']}", size=11, color=ft.Colors.GREY_600, italic=True)
+            ]
+        return ft.Container(
+            content=ft.Column(
+                controls=[
+                    ft.Text(ind["name"], size=13, weight=ft.FontWeight.BOLD, color=ft.Colors.INDIGO_700),
+                    *rows,
+                    *note_row,
+                ],
+                spacing=4,
+            ),
+            bgcolor=ft.Colors.WHITE,
+            border=ft.border.all(1, ft.Colors.GREY_200),
+            border_radius=6,
+            padding=ft.padding.all(10),
+        )
+
+    indicator_section_controls = []
+    if indicators:
+        indicator_section_controls = [
+            ft.Divider(height=1, color=ft.Colors.BLUE_100),
+            ft.Text("📊 指標の見方・判定基準", size=13, weight=ft.FontWeight.BOLD, color=ft.Colors.INDIGO_700),
+            ft.Column(
+                controls=[_make_indicator_card(ind) for ind in indicators],
+                spacing=8,
+            ),
+        ]
+
+    # --- メインコンテンツ ---
     content = ft.Column(
         controls=[
             ft.Container(
@@ -79,8 +155,9 @@ def build_help_panel(
                 spacing=16,
                 vertical_alignment=ft.CrossAxisAlignment.START,
             ),
+            *indicator_section_controls,
         ],
-        spacing=4,
+        spacing=8,
         visible=False,
     )
 
