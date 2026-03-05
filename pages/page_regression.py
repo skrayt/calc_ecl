@@ -10,6 +10,7 @@ from components.plot_utils import plot_residuals
 from components.help_panel import build_help_panel
 from src.analysis.data_transform import transform, standardize, TRANSFORM_METHODS
 from src.analysis.regression import fit_ols, cross_validate
+from src.data.indicator_loader import get_indicator_definitions
 
 
 def regression_page(page: ft.Page) -> ft.Control:
@@ -20,11 +21,16 @@ def regression_page(page: ft.Page) -> ft.Control:
     if df is None or df.empty:
         return ft.Text("先にデータ閲覧タブでデータを読み込んでください。", color=ft.Colors.RED_700)
 
+    # indicator_code → indicator_name のマッピングを取得
+    defs = get_indicator_definitions(df.columns.tolist())
+    code_to_name: dict[str, str] = dict(zip(defs["indicator_code"], defs["indicator_name"]))
+
     selector = VariableSelector(
         page=page,
         columns=df.columns.tolist(),
         show_target=True,
         show_transform=False,
+        code_to_name=code_to_name,
     )
 
     transform_dropdown = ft.Dropdown(
@@ -114,7 +120,7 @@ def regression_page(page: ft.Page) -> ft.Control:
                 ],
                 rows=[
                     ft.DataRow(cells=[
-                        ft.DataCell(ft.Text(row["variable"])),
+                        ft.DataCell(ft.Text(code_to_name.get(row["variable"], row["variable"]))),
                         ft.DataCell(ft.Text(f"{row['coef']:.4f}")),
                         ft.DataCell(ft.Text(f"{row['std_err']:.4f}")),
                         ft.DataCell(ft.Text(f"{row['t_stat']:.4f}")),

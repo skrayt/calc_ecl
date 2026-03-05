@@ -9,6 +9,7 @@ from components.variable_selector import VariableSelector
 from components.plot_utils import plot_correlation_heatmap, plot_vif_heatmap
 from components.help_panel import build_help_panel
 from src.analysis.data_transform import transform, standardize
+from src.data.indicator_loader import get_indicator_definitions
 from src.analysis.correlation import (
     calc_correlation_matrix,
     calc_vif,
@@ -25,12 +26,17 @@ def correlation_page(page: ft.Page) -> ft.Control:
     if df is None or df.empty:
         return ft.Text("先にデータ閲覧タブでデータを読み込んでください。", color=ft.Colors.RED_700)
 
+    # indicator_code → indicator_name のマッピングを取得
+    defs = get_indicator_definitions(df.columns.tolist())
+    code_to_name: dict[str, str] = dict(zip(defs["indicator_code"], defs["indicator_name"]))
+
     # 変数セレクタ
     selector = VariableSelector(
         page=page,
         columns=df.columns.tolist(),
         show_target=True,
         show_transform=False,
+        code_to_name=code_to_name,
     )
 
     # 変換ドロップダウン（全カラム一括）
@@ -96,7 +102,7 @@ def correlation_page(page: ft.Page) -> ft.Control:
                     ],
                     rows=[
                         ft.DataRow(cells=[
-                            ft.DataCell(ft.Text(row["variable"])),
+                            ft.DataCell(ft.Text(code_to_name.get(row["variable"], row["variable"]))),
                             ft.DataCell(ft.Text(
                                 f"{row['vif']:.4f}",
                                 color=ft.Colors.RED_700 if row["vif"] > 10 else None,

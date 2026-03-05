@@ -10,6 +10,7 @@ from components.plot_utils import plot_residuals
 from components.help_panel import build_help_panel
 from src.analysis.data_transform import transform_per_column
 from src.analysis.regression import fit_ols
+from src.data.indicator_loader import get_indicator_definitions
 
 
 def dynamic_regression_page(page: ft.Page) -> ft.Control:
@@ -20,12 +21,17 @@ def dynamic_regression_page(page: ft.Page) -> ft.Control:
     if df is None or df.empty:
         return ft.Text("先にデータ閲覧タブでデータを読み込んでください。", color=ft.Colors.RED_700)
 
+    # indicator_code → indicator_name のマッピングを取得
+    defs = get_indicator_definitions(df.columns.tolist())
+    code_to_name: dict[str, str] = dict(zip(defs["indicator_code"], defs["indicator_name"]))
+
     # 変数セレクタ（変数ごとの変換・標準化設定あり）
     selector = VariableSelector(
         page=page,
         columns=df.columns.tolist(),
         show_target=True,
         show_transform=True,
+        code_to_name=code_to_name,
     )
 
     # 変数ごとのラグ設定用コンテナ
@@ -42,12 +48,12 @@ def dynamic_regression_page(page: ft.Page) -> ft.Control:
             slider = ft.Slider(
                 min=0, max=12, divisions=12,
                 value=lag_values.get(col, 0),
-                label=f"{col}: " + "{value}",
+                label=f"{code_to_name.get(col, col)}: " + "{value}",
                 width=300,
                 on_change=lambda e, c=col: _on_lag_change(e, c),
             )
             lag_settings_container.controls.append(
-                ft.Row([ft.Text(col, width=200, size=12), slider])
+                ft.Row([ft.Text(code_to_name.get(col, col), width=200, size=12), slider])
             )
         page.update()
 
@@ -94,7 +100,7 @@ def dynamic_regression_page(page: ft.Page) -> ft.Control:
             for col in cols:
                 s = settings.get(col, {})
                 setting_rows.append(ft.DataRow(cells=[
-                    ft.DataCell(ft.Text(col)),
+                    ft.DataCell(ft.Text(code_to_name.get(col, col))),
                     ft.DataCell(ft.Text(s.get("transform", "none"))),
                     ft.DataCell(ft.Text("✓" if s.get("standardize") else "")),
                     ft.DataCell(ft.Text(str(lag_values.get(col, 0)))),
@@ -135,7 +141,7 @@ def dynamic_regression_page(page: ft.Page) -> ft.Control:
                     ft.DataColumn(ft.Text("p値")),
                 ],
                 rows=[ft.DataRow(cells=[
-                    ft.DataCell(ft.Text(row["variable"])),
+                    ft.DataCell(ft.Text(code_to_name.get(row["variable"], row["variable"]))),
                     ft.DataCell(ft.Text(f"{row['coef']:.4f}")),
                     ft.DataCell(ft.Text(f"{row['std_err']:.4f}")),
                     ft.DataCell(ft.Text(f"{row['t_stat']:.4f}")),

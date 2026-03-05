@@ -8,6 +8,7 @@ import numpy as np
 
 from components.plot_utils import plot_acf_pacf, plot_forecast
 from components.help_panel import build_help_panel
+from src.data.indicator_loader import get_indicator_definitions
 from src.analysis.arima import (
     fit_arima,
     auto_select_order,
@@ -27,10 +28,14 @@ def arima_page(page: ft.Page) -> ft.Control:
 
     columns = df.columns.tolist()
 
+    # indicator_code → indicator_name のマッピングを取得
+    defs = get_indicator_definitions(columns)
+    code_to_name: dict[str, str] = dict(zip(defs["indicator_code"], defs["indicator_name"]))
+
     # UI部品
     target_dropdown = ft.Dropdown(
         label="対象変数",
-        options=[ft.dropdown.Option(c) for c in columns],
+        options=[ft.dropdown.Option(key=c, text=code_to_name.get(c, c)) for c in columns],
         value=columns[0] if columns else None,
         width=300,
     )

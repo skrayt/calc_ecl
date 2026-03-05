@@ -40,12 +40,14 @@ class VariableSelector:
         show_target: bool = True,
         show_transform: bool = True,
         initial_target: str | None = None,
+        code_to_name: dict | None = None,
     ):
         self.page = page
         self.columns = list(columns)
         self.on_change = on_change
         self.show_target = show_target
         self.show_transform = show_transform
+        self.code_to_name: dict[str, str] = code_to_name or {}
 
         # 状態管理
         self._selected: dict[str, bool] = {c: False for c in self.columns}
@@ -55,7 +57,7 @@ class VariableSelector:
         # UIコンポーネント初期化
         self._target_dropdown = ft.Dropdown(
             label="目的変数",
-            options=[ft.dropdown.Option(c) for c in self.columns],
+            options=[ft.dropdown.Option(key=c, text=self.code_to_name.get(c, c)) for c in self.columns],
             value=initial_target or (self.columns[0] if self.columns else None),
             on_select=self._on_target_change,
             width=300,
@@ -84,7 +86,7 @@ class VariableSelector:
             row_controls.append(cb)
 
             # 変数名ラベル
-            label = ft.Text(col, size=13, width=200)
+            label = ft.Text(self.code_to_name.get(col, col), size=13, width=200)
             row_controls.append(label)
 
             if self.show_transform:
