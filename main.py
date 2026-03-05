@@ -74,7 +74,7 @@ def main(page: ft.Page):
             ft.Tab(label="⑥ ARIMA"),
             ft.Tab(label="⑦ 将来シナリオ"),
         ],
-        on_click=on_tab_change,
+        # on_click は設定しない（Tabs.on_change と二重発火するため）
     )
 
     # 初期ページをロード

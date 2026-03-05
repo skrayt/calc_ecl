@@ -15,6 +15,7 @@ from src.data.indicator_loader import (
 )
 from components.plot_utils import plot_time_series, plot_time_series_grid
 from src.import_indicators import import_csv_gui
+from components.help_panel import build_help_panel
 
 
 def data_view_page(page: ft.Page) -> ft.Control:
@@ -247,13 +248,30 @@ def data_view_page(page: ft.Page) -> ft.Control:
         page.update()
 
     # == レイアウト ==
+    _help = build_help_panel(
+        title="① データ閲覧・管理",
+        purpose="DBに格納されたマクロ経済指標データを閲覧・グラフ表示し、新しいCSVファイルをインポートします。",
+        steps=[
+            "データセットドロップダウンで対象データセットを選択する",
+            "frequencyドロップダウンで粒度（月次・四半期・年度等）を選択する",
+            "チェックボックスで表示したい指標を選び、「選択した指標をプロット」を押す",
+            "新しいデータを取り込む場合は「新規CSVインポート」でCSVファイルを選択する",
+        ],
+        outputs=[
+            "データセットの期間・行数・ID（ステータス表示）",
+            "最新データの先頭20行（日付 + 指標値のテーブル）",
+            "選択した指標の時系列グラフ（1〜3個は1図、4個以上はグリッド）",
+            "インポート進捗バーと完了メッセージ",
+        ],
+    )
     layout = ft.Column(
         controls=[
+            _help,
             ft.Row([
                 ft.Text("データ閲覧・管理", size=24, weight=ft.FontWeight.BOLD),
                 ft.ElevatedButton(
-                    "新規CSVインポート", 
-                    icon=ft.Icons.UPLOAD_FILE, 
+                    "新規CSVインポート",
+                    icon=ft.Icons.UPLOAD_FILE,
                     on_click=pick_csv
                 ),
             ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),

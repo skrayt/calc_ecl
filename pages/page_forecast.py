@@ -5,14 +5,29 @@
 ※ Phase 3-8で本格実装予定。現時点ではプレースホルダ。
 """
 import flet as ft
+from components.help_panel import build_help_panel
 
 
 def forecast_page(page: ft.Page) -> ft.Control:
     """将来シナリオタブのUIを構築する"""
     print("DEBUG: 将来シナリオページ構築開始")
 
+    _help = build_help_panel(
+        title="⑦ 将来シナリオ（実装予定）",
+        purpose="回帰・ARIMAモデルの予測結果をもとに、ベース/楽観/悲観シナリオを作成してECLを算出します。",
+        steps=[
+            "（実装後）シナリオを選択し、各シナリオの重みを設定する",
+            "（実装後）加重平均によるECL算出を実行する",
+            "（実装後）結果をDBに保存する",
+        ],
+        outputs=[
+            "（実装後）シナリオ別の予測値グラフ",
+            "（実装後）加重平均ECL算出結果",
+        ],
+    )
     return ft.Column(
         controls=[
+            _help,
             ft.Text("将来シナリオ", size=24, weight=ft.FontWeight.BOLD),
             ft.Divider(),
             ft.Container(

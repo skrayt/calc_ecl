@@ -7,6 +7,7 @@ import pandas as pd
 
 from components.variable_selector import VariableSelector
 from components.plot_utils import plot_correlation_heatmap, plot_vif_heatmap
+from components.help_panel import build_help_panel
 from src.analysis.data_transform import transform, standardize
 from src.analysis.correlation import (
     calc_correlation_matrix,
@@ -126,8 +127,23 @@ def correlation_page(page: ft.Page) -> ft.Control:
         page.update()
 
     # レイアウト
+    _help = build_help_panel(
+        title="② 相関分析",
+        purpose="目的変数と説明変数の相関係数を可視化し、多重共線性（VIF）を診断します。",
+        steps=[
+            "変数セレクタで目的変数（1つ）と説明変数（複数）を選択する",
+            "必要に応じてデータ変換（log・差分等）と標準化を設定する",
+            "「分析実行」を押す",
+        ],
+        outputs=[
+            "相関行列ヒートマップ（色分けで相関の強さを可視化）",
+            "VIF一覧テーブル（VIF > 10 は赤色警告）",
+            "VIFクロス表ヒートマップ（変数間の多重共線性の関係）",
+        ],
+    )
     return ft.Column(
         controls=[
+            _help,
             ft.Text("相関分析", size=24, weight=ft.FontWeight.BOLD),
             selector.get_ui(),
             ft.Row([transform_dropdown, standardize_switch]),

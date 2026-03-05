@@ -107,7 +107,7 @@ class VariableSelector:
                     label="標準化",
                     value=self._standardize.get(col, False),
                     on_change=lambda e, c=col: self._on_standardize_change(e, c),
-                    label_style=ft.TextStyle(size=11),
+                    label_text_style=ft.TextStyle(size=11),
                 )
                 row_controls.append(std_switch)
 

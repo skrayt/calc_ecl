@@ -7,6 +7,7 @@ import pandas as pd
 
 from components.variable_selector import VariableSelector
 from components.plot_utils import plot_residuals
+from components.help_panel import build_help_panel
 from src.analysis.data_transform import transform, standardize, TRANSFORM_METHODS
 from src.analysis.regression import fit_ols, cross_validate
 
@@ -153,8 +154,25 @@ def regression_page(page: ft.Page) -> ft.Control:
 
         page.update()
 
+    _help = build_help_panel(
+        title="③ 回帰分析",
+        purpose="OLS（最小二乗法）で回帰モデルを構築し、係数・適合度・残差を評価します。",
+        steps=[
+            "変数セレクタで目的変数と説明変数を選択する",
+            "データ変換・標準化・ラグ期間（0〜12）を設定する",
+            "交差検証の分割数を指定する（デフォルト5）",
+            "「分析実行」を押す",
+        ],
+        outputs=[
+            "モデル概要（R²・Adj.R²・AIC・BIC・Durbin-Watson・F統計量）",
+            "係数テーブル（係数・標準誤差・t値・p値、p > 0.05 は赤色）",
+            "残差プロット（正規性・等分散性の診断）",
+            "交差検証結果（平均MSE ± 標準偏差）",
+        ],
+    )
     return ft.Column(
         controls=[
+            _help,
             ft.Text("回帰分析", size=24, weight=ft.FontWeight.BOLD),
             selector.get_ui(),
             ft.Row([transform_dropdown, standardize_switch]),

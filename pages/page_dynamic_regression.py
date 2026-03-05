@@ -7,6 +7,7 @@ import pandas as pd
 
 from components.variable_selector import VariableSelector
 from components.plot_utils import plot_residuals
+from components.help_panel import build_help_panel
 from src.analysis.data_transform import transform_per_column
 from src.analysis.regression import fit_ols
 
@@ -158,8 +159,25 @@ def dynamic_regression_page(page: ft.Page) -> ft.Control:
 
         page.update()
 
+    _help = build_help_panel(
+        title="⑤ 動的回帰（変数別設定）",
+        purpose="変数ごとに異なるデータ変換・標準化・ラグを個別指定した柔軟な回帰分析を行います。",
+        steps=[
+            "変数セレクタで目的変数と説明変数を選択する（各変数に変換・標準化を個別設定）",
+            "「ラグ設定を更新」を押して変数ごとのラグスライダーを表示する",
+            "各変数のラグ期間をスライダーで調整する",
+            "「分析実行」を押す",
+        ],
+        outputs=[
+            "変数設定テーブル（変数・変換方法・標準化・ラグ期間の確認）",
+            "モデル概要（R²・Adj.R²・AIC・BIC・DW・F統計量）",
+            "係数テーブル（係数・標準誤差・t値・p値）",
+            "残差プロット",
+        ],
+    )
     return ft.Column(
         controls=[
+            _help,
             ft.Text("動的回帰（変数別設定）", size=24, weight=ft.FontWeight.BOLD),
             selector.get_ui(),
             ft.Text("変数ごとのラグ設定:", size=14, weight=ft.FontWeight.BOLD),

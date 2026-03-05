@@ -7,6 +7,7 @@ import pandas as pd
 import numpy as np
 
 from components.plot_utils import plot_acf_pacf, plot_forecast
+from components.help_panel import build_help_panel
 from src.analysis.arima import (
     fit_arima,
     auto_select_order,
@@ -213,8 +214,26 @@ def arima_page(page: ft.Page) -> ft.Control:
             results.append(ft.Text(f"予測エラー: {ex}", color=ft.Colors.ORANGE_700))
 
     # レイアウト
+    _help = build_help_panel(
+        title="⑥ ARIMA分析",
+        purpose="単一の時系列変数に対してARIMA(p,d,q)モデルを学習し、将来値を予測します。",
+        steps=[
+            "対象変数ドロップダウンで分析したい指標を選ぶ",
+            "「ADF検定 + ACF/PACF」で定常性を確認し、適切なd（差分次数）を判断する",
+            "【手動】p・d・qを入力して「ARIMA学習」を押す、または",
+            "【自動】max_p/max_d/max_qを指定して「自動選択実行」を押す（AIC最小モデルを選択）",
+            "予測期間を入力して予測グラフを確認する",
+        ],
+        outputs=[
+            "ADF検定結果（ADF統計量・p値・定常性判定）",
+            "ACF/PACFグラフ（自己相関・偏自己相関、信頼区間付き）",
+            "自動選択：上位10モデルテーブル（p・d・q・AIC・BIC・収束判定）",
+            "将来予測グラフ（実績 + 予測値の時系列）",
+        ],
+    )
     return ft.Column(
         controls=[
+            _help,
             ft.Text("ARIMA分析", size=24, weight=ft.FontWeight.BOLD),
             target_dropdown,
             ft.ElevatedButton("ADF検定 + ACF/PACF", on_click=run_adf_test, icon=ft.Icons.ASSESSMENT),

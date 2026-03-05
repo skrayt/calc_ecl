@@ -7,6 +7,7 @@ import pandas as pd
 
 from src.analysis.data_transform import TRANSFORM_METHODS
 from src.analysis.model_selection import search_best_model, filter_models
+from components.help_panel import build_help_panel
 
 
 def model_selection_page(page: ft.Page) -> ft.Control:
@@ -153,8 +154,25 @@ def model_selection_page(page: ft.Page) -> ft.Control:
         )
 
     # レイアウト
+    _help = build_help_panel(
+        title="④ モデル選択（組み合わせ探索）",
+        purpose="説明変数の全組み合わせを自動探索し、AIC・BIC・Adj.R²で最適なモデルを比較します。",
+        steps=[
+            "目的変数ドロップダウンで目的変数を選択する",
+            "「説明変数候補」チェックボックスで探索対象の変数を選ぶ",
+            "「説明変数の個数」で最終モデルに含める変数数を指定する（例：2）",
+            "データ変換・標準化・ラグ・ソート基準・VIFフィルタを設定する",
+            "「組み合わせ探索実行」を押す",
+        ],
+        outputs=[
+            "モデル候補テーブル（features・R²・Adj.R²・AIC・BIC・DW・max_VIF、最大50件）",
+            "max_VIF > 10 のモデルは赤色でハイライト",
+            "表示件数（X/Y件）",
+        ],
+    )
     return ft.Column(
         controls=[
+            _help,
             ft.Text("モデル選択（組み合わせ探索）", size=24, weight=ft.FontWeight.BOLD),
             target_dropdown,
             ft.Text("説明変数候補:", size=14, weight=ft.FontWeight.BOLD),
