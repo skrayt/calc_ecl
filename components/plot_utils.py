@@ -17,19 +17,34 @@ import pandas as pd
 import seaborn as sns
 
 # フォントの設定（WinPython/macOS両対応）
-plt.rcParams["font.family"] = "sans-serif"
-plt.rcParams["font.sans-serif"] = [
-    "Yu Gothic",
-    "Meiryo",
-    "MS Gothic",
-    "Hiragino Maru Gothic Pro",
-    "Hiragino Sans",
-    "Arial",
-]
-plt.rcParams["axes.unicode_minus"] = False
+# matplotlibキャッシュに存在するフォントのみ有効になるため、両環境分を列挙する
+# Windows: "Yu Gothic", "Meiryo", "MS Gothic"
+# macOS:   "YuGothic"（スペースなし）, "Hiragino Sans", "Hiragino Maru Gothic Pro"
+import sys as _sys
+import matplotlib.font_manager as _fm
 
-# seabornの設定
+def _get_available_fonts(candidates: list[str]) -> list[str]:
+    """候補フォントのうちmatplotlibキャッシュに存在するものだけ返す"""
+    registered = {f.name for f in _fm.fontManager.ttflist}
+    return [f for f in candidates if f in registered]
+
+_jp_font_candidates = [
+    "Yu Gothic",                 # Windows（WinPython標準）
+    "Meiryo",                    # Windows
+    "MS Gothic",                 # Windows（フォールバック）
+    "YuGothic",                  # macOS（スペースなし）
+    "Hiragino Sans",             # macOS新
+    "Hiragino Maru Gothic Pro",  # macOS旧
+]
+_available_fonts = _get_available_fonts(_jp_font_candidates) + ["Arial"]
+
+# seabornの設定（先に行う。set_styleはrcParamsを上書きするためフォント設定より前に実行する）
 sns.set_style("whitegrid")
+
+# フォント設定はset_styleの後に行う（set_styleによる上書きを防ぐため）
+plt.rcParams["font.family"] = "sans-serif"
+plt.rcParams["font.sans-serif"] = _available_fonts
+plt.rcParams["axes.unicode_minus"] = False
 
 # デフォルトのfigsize
 DEFAULT_FIGSIZE = (12, 6)

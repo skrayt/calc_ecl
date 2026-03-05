@@ -81,10 +81,12 @@ def main(page: ft.Page):
     body.controls.append(data_view_page(page))
 
     # Tabs コントローラー（TabBarを内包する必要がある）
+    # expand=True で画面高さいっぱいに広げることで、body の scroll が機能する
     tabs_ctrl = ft.Tabs(
         length=7,
         selected_index=0,
         on_change=on_tab_change,
+        expand=True,
         content=ft.Column(
             controls=[tab_bar, body],
             expand=True,
