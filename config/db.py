@@ -23,14 +23,14 @@ def _load_config() -> dict:
 def get_connection():
     """PostgreSQL接続を返す
 
-    DB名: Craft、スキーマ: calc_ecl
+    DB名: craft、スキーマ: calc_ecl
     接続後に search_path を calc_ecl に設定する。
     """
     cfg = _load_config()
     conn = psycopg2.connect(
         host=cfg.get("host", "localhost"),
         port=cfg.get("port", "5432"),
-        dbname=cfg.get("dbname", "Craft"),
+        dbname=cfg.get("dbname", "craft"),
         user=cfg.get("user", "postgres"),
         password=cfg.get("password", ""),
     )

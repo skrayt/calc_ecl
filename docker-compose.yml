@@ -4,7 +4,7 @@ services:
     container_name: calc_ecl_db
     restart: always
     environment:
-      POSTGRES_DB: Craft
+      POSTGRES_DB: craft
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
     ports:
