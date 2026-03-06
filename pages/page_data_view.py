@@ -71,7 +71,8 @@ def data_view_page(page: ft.Page) -> ft.Control:
             nonlocal prompt_result
             prompt_result = e.control.data
             prompt_event.set()
-            page.close(mapping_dialog)
+            mapping_dialog.open = False
+            page.update()
 
         mapping_dialog = ft.AlertDialog(
             modal=True,
@@ -96,7 +97,8 @@ def data_view_page(page: ft.Page) -> ft.Control:
             )
             new_code_input.value = ""
             prompt_event.clear()
-            page.open(mapping_dialog)
+            mapping_dialog.open = True
+            page.update()
             prompt_event.wait()
             if prompt_result == "add":
                 return {"action": "add", "code": new_code_input.value}
@@ -138,6 +140,7 @@ def data_view_page(page: ft.Page) -> ft.Control:
                 start_import_thread(files[0].path)
 
         file_picker = ft.FilePicker()
+        page.overlay.append(mapping_dialog)
 
         def load_datasets_list():
             try:
@@ -364,7 +367,8 @@ def data_view_page(page: ft.Page) -> ft.Control:
         def on_t_name_dialog_close(e):
             t_name_dialog_result[0] = e.control.data
             t_name_dialog_event.set()
-            page.close(t_name_dialog)
+            t_name_dialog.open = False
+            page.update()
 
         t_name_dialog = ft.AlertDialog(
             modal=True,
@@ -375,7 +379,7 @@ def data_view_page(page: ft.Page) -> ft.Control:
                 ft.TextButton("キャンセル", on_click=on_t_name_dialog_close, data="cancel"),
             ],
         )
-        # t_name_dialogはpage.open()で表示する
+        # t_name_dialogはpage.overlayに追加してdialog.open=Trueで表示する
 
         def on_t_import_result(res):
             t_progress_bar.visible = False
@@ -429,7 +433,8 @@ def data_view_page(page: ft.Page) -> ft.Control:
                             t_name_dialog_content.controls.append(tf)
 
                         t_name_dialog_event.clear()
-                        page.open(t_name_dialog)
+                        t_name_dialog.open = True
+                        page.update()
                         t_name_dialog_event.wait()
 
                         if t_name_dialog_result[0] == "cancel":
@@ -472,6 +477,7 @@ def data_view_page(page: ft.Page) -> ft.Control:
                 )
 
         t_file_picker = ft.FilePicker()
+        page.overlay.append(t_name_dialog)
 
         # データ読み込み・表示ロジック
         def load_target_datasets_list():
