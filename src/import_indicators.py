@@ -8,7 +8,7 @@
     1. config/column_mapping.json からカラムマッピングを読み込む
     2. CSVに未知のカラムがあれば対話的にマッピングを追加（JSONに保存）
     3. indicator_sources に出典を登録（初回のみ）
-    4. indicator_datasets にデータセット（取得回）を登録
+    4. indicator_datasets にデータセット（決算年月単位）を登録または更新
     5. indicator_definitions に指標定義を登録（未登録の場合）
     6. CSVをパースして indicator_data へINSERT
 """
@@ -89,6 +89,78 @@ def detect_frequency_from_csv(csv_path: str, col_index: int) -> str:
     return best_freq or "monthly"
 
 
+def detect_unknown_columns(csv_path: str, csv_columns: list[str]) -> list[tuple[str, int, dict]]:
+    """未知のカラムを検出し、自動検出情報とともに返す。
+
+    Returns
+    -------
+    list of (col_name, col_index, auto_info)
+        auto_info: {"name", "base_year", "unit", "frequency"}
+    """
+    mapping = load_mapping()
+    known_columns = mapping["columns"]
+    skip_columns = mapping.get("skip_columns", [])
+    unknowns = []
+
+    for col_index, col in enumerate(csv_columns):
+        if col in known_columns or col in skip_columns:
+            continue
+        if col == "注記" or col.startswith("注記"):
+            continue
+
+        auto_info = {
+            "name": detect_indicator_name(col),
+            "base_year": detect_base_year(col),
+            "unit": detect_unit(col),
+            "frequency": detect_frequency_from_csv(csv_path, col_index),
+        }
+        unknowns.append((col, col_index, auto_info))
+
+    return unknowns
+
+
+def apply_mapping_results(results: list[dict]) -> dict:
+    """ユーザーの入力結果をマッピングファイルに保存する。
+
+    Parameters
+    ----------
+    results : list of dict
+        各要素: {"col": col_name, "action": "add"|"skip"|"ignore",
+                 "code": indicator_code, "auto_info": {...}}
+
+    Returns
+    -------
+    dict
+        更新後のマッピング設定
+    """
+    mapping = load_mapping()
+    known_columns = mapping["columns"]
+    skip_columns = mapping.get("skip_columns", [])
+    updated = False
+
+    for r in results:
+        if r["action"] == "skip":
+            skip_columns.append(r["col"])
+            updated = True
+        elif r["action"] == "add" and r.get("code"):
+            ai = r["auto_info"]
+            known_columns[r["col"]] = {
+                "code": r["code"],
+                "name": ai["name"],
+                "unit": ai["unit"],
+                "base_year": ai["base_year"],
+                "frequency": ai["frequency"],
+            }
+            updated = True
+
+    if updated:
+        mapping["columns"] = known_columns
+        mapping["skip_columns"] = skip_columns
+        save_mapping(mapping)
+
+    return mapping
+
+
 def resolve_mapping(csv_path: str, csv_columns: list[str]) -> dict:
     """（既存のターミナル用）CSVカラムとマッピング設定を突合する。"""
     mapping = load_mapping()
@@ -135,54 +207,6 @@ def resolve_mapping(csv_path: str, csv_columns: list[str]) -> dict:
             updated = True
         else:
             continue
-
-    if updated:
-        mapping["columns"] = known_columns
-        mapping["skip_columns"] = skip_columns
-        save_mapping(mapping)
-
-    return mapping
-
-
-def resolve_mapping_gui(csv_path: str, csv_columns: list[str], prompt_callback) -> dict:
-    """GUI用のマッピング解決。
-    prompt_callback: (col_name, auto_detected_info) -> result_dict or None を呼び出す。
-    """
-    mapping = load_mapping()
-    known_columns = mapping["columns"]
-    skip_columns = mapping.get("skip_columns", [])
-    updated = False
-
-    for col_index, col in enumerate(csv_columns):
-        if col in known_columns or col in skip_columns:
-            continue
-        if col == "注記" or col.startswith("注記"):
-            continue
-
-        auto_info = {
-            "name": detect_indicator_name(col),
-            "base_year": detect_base_year(col),
-            "unit": detect_unit(col),
-            "frequency": detect_frequency_from_csv(csv_path, col_index)
-        }
-
-        # GUI側へ入力を依頼
-        result = prompt_callback(col, auto_info)
-        
-        if result is None: # 無視
-            continue
-        elif result.get("action") == "skip":
-            skip_columns.append(col)
-            updated = True
-        elif result.get("action") == "add" and result.get("code"):
-            known_columns[col] = {
-                "code": result["code"],
-                "name": auto_info["name"],
-                "unit": auto_info["unit"],
-                "base_year": auto_info["base_year"],
-                "frequency": auto_info["frequency"],
-            }
-            updated = True
 
     if updated:
         mapping["columns"] = known_columns
@@ -254,19 +278,59 @@ def ensure_source(cur) -> int:
     return cur.fetchone()[0]
 
 
-def create_dataset(cur, source_id: int, retrieved_at: date, indicator_keys: list) -> int:
-    """indicator_datasets にデータセットを登録"""
+def find_dataset_by_fiscal_ym(cur, fiscal_year_month: date) -> int | None:
+    """指定された決算年月のデータセットIDを検索する。なければNoneを返す。"""
+    cur.execute(
+        "SELECT dataset_id FROM indicator_datasets WHERE fiscal_year_month = %s",
+        (fiscal_year_month,),
+    )
+    row = cur.fetchone()
+    return row[0] if row else None
+
+
+def replace_dataset_data(cur, dataset_id: int):
+    """指定データセットのindicator_dataを全削除する（全置換の前処理）"""
+    cur.execute(
+        "DELETE FROM indicator_data WHERE dataset_id = %s",
+        (dataset_id,),
+    )
+
+
+def update_dataset_metadata(cur, dataset_id: int, retrieved_at: date,
+                            indicator_keys: list, source_id: int):
+    """既存データセットのメタデータを更新する"""
+    dataset_name = f"{retrieved_at.strftime('%Y年%m月')}取得"
+    cur.execute(
+        """UPDATE indicator_datasets
+           SET dataset_name = %s, retrieved_at = %s, indicator_keys = %s,
+               source_id = %s, description = %s
+           WHERE dataset_id = %s""",
+        (
+            dataset_name,
+            retrieved_at,
+            json.dumps(indicator_keys),
+            source_id,
+            f"統計ダッシュボードから{retrieved_at}に取得",
+            dataset_id,
+        ),
+    )
+
+
+def create_dataset(cur, source_id: int, retrieved_at: date,
+                    indicator_keys: list, fiscal_year_month: date) -> int:
+    """indicator_datasets にデータセットを新規登録"""
     dataset_name = f"{retrieved_at.strftime('%Y年%m月')}取得"
     cur.execute(
         """INSERT INTO indicator_datasets
-           (dataset_name, retrieved_at, source_id, indicator_keys, description)
-           VALUES (%s, %s, %s, %s, %s) RETURNING dataset_id""",
+           (dataset_name, retrieved_at, source_id, indicator_keys, description, fiscal_year_month)
+           VALUES (%s, %s, %s, %s, %s, %s) RETURNING dataset_id""",
         (
             dataset_name,
             retrieved_at,
             source_id,
             json.dumps(indicator_keys),
             f"統計ダッシュボードから{retrieved_at}に取得",
+            fiscal_year_month,
         ),
     )
     return cur.fetchone()[0]
@@ -300,16 +364,26 @@ def ensure_indicator_definitions(cur, source_id: int, column_mapping: dict):
 # =========================================================
 # CSVパース & インポート
 # =========================================================
-def import_csv_gui(csv_path: str, retrieved_at: date, progress_callback=None, prompt_callback=None):
-    """GUI経由のインポート実行"""
+def import_csv_gui(csv_path: str, retrieved_at: date, fiscal_year_month: date,
+                   progress_callback=None):
+    """GUI経由のインポート実行
+
+    Parameters
+    ----------
+    csv_path : str
+        CSVファイルパス
+    retrieved_at : date
+        データ取得日（通常は今日）
+    fiscal_year_month : date
+        決算年月（月初日で指定。例: 2026-03-01 = 2026年3月期）
+    progress_callback : callable, optional
+        進捗コールバック (current, total)
+    """
     df = pd.read_csv(csv_path, encoding="utf-8", dtype=str)
-    
-    # 1. カラムマッピングの解決
-    if prompt_callback:
-        mapping = resolve_mapping_gui(csv_path, list(df.columns), prompt_callback)
-    else:
-        mapping = load_mapping()
-    
+
+    # マッピング読み込み（未知カラムの解決はUI側で事前に完了済み）
+    mapping = load_mapping()
+
     column_mapping = mapping["columns"]
     value_columns = []
     columns = list(df.columns)
@@ -331,9 +405,19 @@ def import_csv_gui(csv_path: str, retrieved_at: date, progress_callback=None, pr
         cur = conn.cursor()
         source_id = ensure_source(cur)
         ensure_indicator_definitions(cur, source_id, column_mapping)
-        
+
         indicator_keys = [m["code"] for _, m in value_columns]
-        dataset_id = create_dataset(cur, source_id, retrieved_at, indicator_keys)
+
+        # 決算年月で既存データセットを検索
+        existing_id = find_dataset_by_fiscal_ym(cur, fiscal_year_month)
+        if existing_id is not None:
+            # 全置換: 既存データを削除してメタデータを更新
+            replace_dataset_data(cur, existing_id)
+            update_dataset_metadata(cur, existing_id, retrieved_at, indicator_keys, source_id)
+            dataset_id = existing_id
+        else:
+            # 新規作成
+            dataset_id = create_dataset(cur, source_id, retrieved_at, indicator_keys, fiscal_year_month)
 
         total = len(df)
         inserted = 0
@@ -386,13 +470,19 @@ def import_csv_gui(csv_path: str, retrieved_at: date, progress_callback=None, pr
                        indicators = indicator_data.indicators || EXCLUDED.indicators,
                        notes = COALESCE(indicator_data.notes, '{}'::jsonb) || COALESCE(EXCLUDED.notes, '{}'::jsonb),
                        imported_at = now()""",
-                (dataset_id, ref_date, frequency, region_code, region_name, 
+                (dataset_id, ref_date, frequency, region_code, region_name,
                  json.dumps(indicators), json.dumps(notes) if notes else None),
             )
             inserted += 1
 
         conn.commit()
-        return {"inserted": inserted, "skipped": skipped, "dataset_id": dataset_id}
+        is_replace = existing_id is not None
+        return {
+            "inserted": inserted,
+            "skipped": skipped,
+            "dataset_id": dataset_id,
+            "replaced": is_replace,
+        }
 
     except Exception as e:
         conn.rollback()
@@ -401,8 +491,8 @@ def import_csv_gui(csv_path: str, retrieved_at: date, progress_callback=None, pr
         conn.close()
 
 
-def import_csv(csv_path: str, retrieved_at: date):
-    """メインのインポート処理"""
+def import_csv(csv_path: str, retrieved_at: date, fiscal_year_month: date):
+    """メインのインポート処理（CLI用）"""
     # CSV読み込み
     df = pd.read_csv(csv_path, encoding="utf-8", dtype=str)
     print(f"CSV読み込み完了: {len(df)}行")
@@ -428,7 +518,6 @@ def import_csv(csv_path: str, retrieved_at: date):
     note_col_indices = {}
     for i, col in enumerate(columns):
         if col in column_mapping:
-            # 直後が「注記」系なら記録
             if i + 1 < len(columns) and (columns[i + 1] == "注記" or columns[i + 1].startswith("注記")):
                 note_col_indices[col] = i + 1
 
@@ -444,10 +533,18 @@ def import_csv(csv_path: str, retrieved_at: date):
         ensure_indicator_definitions(cur, source_id, column_mapping)
         print("指標定義マスタ登録完了")
 
-        # 3. データセット登録
+        # 3. データセット登録（決算年月ベース）
         indicator_keys = [m["code"] for _, m in value_columns]
-        dataset_id = create_dataset(cur, source_id, retrieved_at, indicator_keys)
-        print(f"データセットID: {dataset_id} ({retrieved_at}取得)")
+        existing_id = find_dataset_by_fiscal_ym(cur, fiscal_year_month)
+        if existing_id is not None:
+            replace_dataset_data(cur, existing_id)
+            update_dataset_metadata(cur, existing_id, retrieved_at, indicator_keys, source_id)
+            dataset_id = existing_id
+            print(f"既存データセットを上書き: ID={dataset_id}")
+        else:
+            dataset_id = create_dataset(cur, source_id, retrieved_at, indicator_keys, fiscal_year_month)
+            print(f"新規データセットID: {dataset_id}")
+        print(f"決算年月: {fiscal_year_month.strftime('%Y年%m月')}期")
 
         # 4. 行ごとにパースしてINSERT
         inserted = 0
@@ -464,7 +561,6 @@ def import_csv(csv_path: str, retrieved_at: date):
             region_code = row["地域コード"]
             region_name = row["地域"]
 
-            # 指標値をJSONBに組み立て
             indicators = {}
             notes = {}
 
@@ -473,10 +569,8 @@ def import_csv(csv_path: str, retrieved_at: date):
                 if pd.isna(val) or val == "":
                     continue
 
-                # 数値変換
                 try:
                     num_val = float(val.replace(",", ""))
-                    # 整数として扱える場合はintに
                     if num_val == int(num_val):
                         indicators[col_def["code"]] = int(num_val)
                     else:
@@ -484,14 +578,12 @@ def import_csv(csv_path: str, retrieved_at: date):
                 except ValueError:
                     continue
 
-                # 注記
                 if col_name in note_col_indices:
                     note_idx = note_col_indices[col_name]
                     note_val = row.iloc[note_idx]
                     if pd.notna(note_val) and note_val != "":
                         notes[col_def["code"]] = note_val
 
-            # 指標が1つもなければスキップ
             if not indicators:
                 skipped += 1
                 continue
@@ -540,13 +632,19 @@ def main():
         default=date.today(),
         help="データ取得日 (YYYY-MM-DD形式、デフォルト: 今日)",
     )
+    parser.add_argument(
+        "--fiscal-ym",
+        type=lambda s: date(int(s.split("-")[0]), int(s.split("-")[1]), 1),
+        required=True,
+        help="決算年月 (YYYY-MM形式、例: 2026-03)",
+    )
     args = parser.parse_args()
 
     if not Path(args.csv_path).exists():
         print(f"ファイルが見つかりません: {args.csv_path}")
         sys.exit(1)
 
-    import_csv(args.csv_path, args.retrieved_at)
+    import_csv(args.csv_path, args.retrieved_at, args.fiscal_ym)
 
 
 if __name__ == "__main__":

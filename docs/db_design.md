@@ -8,6 +8,7 @@ IFRS9/予想信用損失(ECL)モデルの将来予想に使用するマクロ経
 - **DBMS**: PostgreSQL 15
 - **DDLファイル**: `db/migrations/001_create_tables.sql`（説明変数・モデル）
 - **DDLファイル**: `db/migrations/002_create_target_tables.sql`（目的変数）
+- **DDLファイル**: `db/migrations/003_add_fiscal_year_month.sql`（決算年月カラム追加）
 
 ---
 
@@ -123,11 +124,17 @@ gdp_nominal_2025base  （新）← 別レコードとして追加
 | dataset_id | SERIAL | PK | |
 | dataset_name | VARCHAR(200) | o | 例: '2026年3月取得' |
 | retrieved_at | DATE | o | データ取得日 |
+| fiscal_year_month | DATE | | 決算年月（月初日で格納。例: 2026-03-01 = 2026年3月期） |
 | source_id | INTEGER | | FK → indicator_sources |
 | indicator_keys | JSONB | o | 含有指標コード配列 |
 | description | TEXT | | 備考 |
 | is_active | BOOLEAN | | デフォルトTRUE |
 | created_at | TIMESTAMPTZ | | 作成日時 |
+
+**部分ユニークインデックス**: `idx_indicator_datasets_fiscal_ym`
+- 対象: `fiscal_year_month`（NULLは制約対象外）
+- 同一決算年月のデータセットは1つだけ存在できる
+- 同じ決算年月でCSVを再インポートすると、既存データセットを削除して新規作成する（DELETE + re-INSERT）
 
 **indicator_keys の例**:
 ```json

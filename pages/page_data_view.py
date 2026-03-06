@@ -13,6 +13,7 @@ from src.data.indicator_loader import (
     list_frequencies,
     load_indicators,
     get_indicator_definitions,
+    find_dataset_by_fiscal_ym,
     list_target_datasets,
     list_target_frequencies,
     list_target_segments,
@@ -20,7 +21,11 @@ from src.data.indicator_loader import (
     get_target_definitions,
 )
 from components.plot_utils import plot_single_series
-from src.import_indicators import import_csv_gui
+from src.import_indicators import (
+    import_csv_gui,
+    detect_unknown_columns,
+    apply_mapping_results,
+)
 from src.import_targets import import_target_csv_gui
 from components.help_panel import build_help_panel
 
@@ -36,8 +41,6 @@ def data_view_page(page: ft.Page) -> ft.Control:
         """説明変数タブのUIを構築する"""
         current_df_ref = [None]
         code_to_name_ref = [{}]
-        prompt_result = None
-        prompt_event = threading.Event()
 
         # UI部品
         dataset_dropdown = ft.Dropdown(
@@ -62,48 +65,70 @@ def data_view_page(page: ft.Page) -> ft.Control:
         progress_bar = ft.ProgressBar(width=400, color="blue", visible=False)
         import_status = ft.Text("", size=12)
 
-        # 指標コード入力ダイアログ
-        new_code_input = ft.TextField(label="指標コード (snake_case)")
-        col_name_text = ft.Text("", weight="bold")
-        auto_info_text = ft.Text("", size=11)
+        # 決算年月入力
+        current_year = date.today().year
+        fiscal_year_dd = ft.Dropdown(
+            label="決算年", width=120,
+            options=[ft.dropdown.Option(str(y), f"{y}年") for y in range(current_year - 2, current_year + 5)],
+            value=str(current_year),
+        )
+        fiscal_month_dd = ft.Dropdown(
+            label="決算月", width=100,
+            options=[ft.dropdown.Option(str(m), f"{m}月") for m in range(1, 13)],
+            value="3",
+        )
 
-        def close_dlg(e):
-            nonlocal prompt_result
-            prompt_result = e.control.data
-            prompt_event.set()
+        # --- 一括マッピングダイアログ ---
+        batch_dialog_content = ft.Column([], spacing=12, scroll=ft.ScrollMode.AUTO)
+        batch_dialog_result = [None]
+        batch_dialog_event = threading.Event()
+        batch_col_widgets = []  # [(col_name, auto_info, action_dd, code_tf), ...]
+
+        def close_batch_dialog(e):
+            batch_dialog_result[0] = e.control.data
             page.pop_dialog()
+            page.update()
+            batch_dialog_event.set()
 
-        mapping_dialog = ft.AlertDialog(
+        batch_mapping_dialog = ft.AlertDialog(
             modal=True,
             title=ft.Text("未知のカラムが見つかりました"),
-            content=ft.Column([col_name_text, auto_info_text, new_code_input], tight=True, spacing=10),
+            content=ft.Container(
+                content=batch_dialog_content,
+                height=400, width=550,
+            ),
             actions=[
-                ft.TextButton("追加", on_click=close_dlg, data="add"),
-                ft.TextButton("スキップ登録", on_click=close_dlg, data="skip"),
-                ft.TextButton("今回は無視", on_click=close_dlg, data="ignore"),
+                ft.TextButton("確定", on_click=close_batch_dialog, data="ok"),
+                ft.TextButton("キャンセル", on_click=close_batch_dialog, data="cancel"),
             ],
         )
 
-        def prompt_callback_gui(col_name, auto_info):
-            nonlocal prompt_result
-            col_name_text.value = f"カラム名: {col_name}"
-            auto_info_text.value = (
-                f"自動検出結果:\n"
-                f"  名前: {auto_info['name']}\n"
-                f"  基準年: {auto_info['base_year'] or 'なし'}\n"
-                f"  単位: {auto_info['unit'] or 'なし'}\n"
-                f"  粒度: {auto_info['frequency']}"
-            )
-            new_code_input.value = ""
-            prompt_event.clear()
-            page.show_dialog(mapping_dialog)
+        # --- 上書き確認ダイアログ ---
+        confirm_dialog_result = [None]
+        confirm_dialog_event = threading.Event()
+        confirm_text = ft.Text("")
+
+        def close_confirm_dialog(e):
+            confirm_dialog_result[0] = e.control.data
+            page.pop_dialog()
             page.update()
-            prompt_event.wait()
-            if prompt_result == "add":
-                return {"action": "add", "code": new_code_input.value}
-            elif prompt_result == "skip":
-                return {"action": "skip"}
-            return None
+            confirm_dialog_event.set()
+
+        confirm_dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("データセットの上書き確認"),
+            content=confirm_text,
+            actions=[
+                ft.TextButton("上書き", on_click=close_confirm_dialog, data="yes"),
+                ft.TextButton("キャンセル", on_click=close_confirm_dialog, data="no"),
+            ],
+        )
+
+        def _get_fiscal_year_month() -> date:
+            """UIから決算年月を取得する"""
+            y = int(fiscal_year_dd.value or current_year)
+            m = int(fiscal_month_dd.value or 3)
+            return date(y, m, 1)
 
         def on_import_result(res):
             progress_bar.visible = False
@@ -111,19 +136,118 @@ def data_view_page(page: ft.Page) -> ft.Control:
                 import_status.value = f"エラー: {res['error']}"
                 import_status.color = ft.Colors.RED_700
             else:
-                import_status.value = f"インポート完了: {res['inserted']}件登録 (ID: {res['dataset_id']})"
+                action = "上書き" if res.get("replaced") else "新規登録"
+                import_status.value = (
+                    f"インポート完了({action}): {res['inserted']}件登録 "
+                    f"(ID: {res['dataset_id']})"
+                )
                 import_status.color = ft.Colors.GREEN_700
                 load_datasets_list()
             page.update()
 
-        def start_import_thread(file_path):
+        def start_import_thread(file_path, fiscal_year_month):
+            """インポートをバックグラウンドスレッドで実行する"""
             def run():
                 try:
+                    import pandas as _pd
+                    # 1. CSV読み込みとヘッダー取得
+                    csv_df = _pd.read_csv(file_path, encoding="utf-8", dtype=str, nrows=0)
+                    csv_columns = list(csv_df.columns)
+
+                    # 2. 未知カラム検出
+                    unknowns = detect_unknown_columns(file_path, csv_columns)
+
+                    # 3. 未知カラムがあれば一括ダイアログ表示
+                    if unknowns:
+                        batch_col_widgets.clear()
+                        batch_dialog_content.controls.clear()
+
+                        for col_name, _, auto_info in unknowns:
+                            action_dd = ft.Dropdown(
+                                label="アクション", width=140,
+                                options=[
+                                    ft.dropdown.Option("add", "追加"),
+                                    ft.dropdown.Option("skip", "スキップ登録"),
+                                    ft.dropdown.Option("ignore", "今回は無視"),
+                                ],
+                                value="add",
+                            )
+                            code_tf = ft.TextField(
+                                label="指標コード (snake_case)", width=250,
+                            )
+                            batch_col_widgets.append(
+                                (col_name, auto_info, action_dd, code_tf)
+                            )
+
+                            info_text = (
+                                f"名前: {auto_info['name']}"
+                                + (f" | 基準年: {auto_info['base_year']}" if auto_info['base_year'] else "")
+                                + (f" | 単位: {auto_info['unit']}" if auto_info['unit'] else "")
+                                + f" | 粒度: {auto_info['frequency']}"
+                            )
+                            batch_dialog_content.controls.append(
+                                ft.Container(
+                                    content=ft.Column([
+                                        ft.Text(f"カラム: {col_name}", weight=ft.FontWeight.BOLD, size=13),
+                                        ft.Text(info_text, size=11),
+                                        ft.Row([action_dd, code_tf], spacing=8),
+                                    ], spacing=4),
+                                    padding=8,
+                                    border=ft.border.all(1, ft.Colors.GREY_300),
+                                    border_radius=4,
+                                )
+                            )
+
+                        batch_dialog_event.clear()
+                        batch_dialog_result[0] = None
+                        page.show_dialog(batch_mapping_dialog)
+                        page.update()
+                        batch_dialog_event.wait()
+
+                        if batch_dialog_result[0] == "cancel":
+                            on_import_result({"error": "キャンセルされました"})
+                            return
+
+                        # ユーザー入力結果を保存
+                        results = []
+                        for col_name, auto_info, action_dd, code_tf in batch_col_widgets:
+                            results.append({
+                                "col": col_name,
+                                "action": action_dd.value or "ignore",
+                                "code": code_tf.value or "",
+                                "auto_info": auto_info,
+                            })
+                        apply_mapping_results(results)
+
+                    # 4. 既存データセットの確認（上書き確認）
+                    existing = find_dataset_by_fiscal_ym(fiscal_year_month)
+                    if existing:
+                        confirm_text.value = (
+                            f"決算年月 {fiscal_year_month.strftime('%Y年%m月')}期 のデータセットが\n"
+                            f"既に存在します（ID: {existing['dataset_id']}, "
+                            f"{existing['dataset_name']}）。\n\n"
+                            f"既存データを全て削除して上書きしますか？"
+                        )
+                        confirm_dialog_event.clear()
+                        confirm_dialog_result[0] = None
+                        page.show_dialog(confirm_dialog)
+                        page.update()
+                        confirm_dialog_event.wait()
+
+                        if confirm_dialog_result[0] != "yes":
+                            on_import_result({"error": "キャンセルされました"})
+                            return
+
+                    # 5. インポート実行
                     def prog(curr, total):
                         progress_bar.value = curr / total
                         import_status.value = f"インポート中... {curr}/{total}"
                         page.update()
-                    res = import_csv_gui(file_path, date.today(), progress_callback=prog, prompt_callback=prompt_callback_gui)
+
+                    res = import_csv_gui(
+                        file_path, date.today(), fiscal_year_month,
+                        progress_callback=prog,
+                    )
                     on_import_result(res)
                 except Exception as ex:
                     on_import_result({"error": str(ex)})
@@ -131,12 +255,13 @@ def data_view_page(page: ft.Page) -> ft.Control:
 
         async def pick_csv(e):
             files = await file_picker.pick_files(allow_multiple=False, allowed_extensions=["csv"])
-            if files:
+            if files and files[0].path:
+                fiscal_ym = _get_fiscal_year_month()
                 progress_bar.visible = True
                 progress_bar.value = 0
                 import_status.value = "準備中..."
                 page.update()
-                start_import_thread(files[0].path)
+                start_import_thread(files[0].path, fiscal_ym)
 
         file_picker = ft.FilePicker()
 
@@ -146,7 +271,12 @@ def data_view_page(page: ft.Page) -> ft.Control:
                 dataset_dropdown.options = [
                     ft.dropdown.Option(
                         key=str(row["dataset_id"]),
-                        text=f"ID:{row['dataset_id']} - {row['dataset_name']} ({row['retrieved_at']})",
+                        text=(
+                            f"ID:{row['dataset_id']} - {row['dataset_name']}"
+                            + (f" [{row['fiscal_year_month'].strftime('%Y年%m月')}期]"
+                               if pd.notna(row.get('fiscal_year_month')) else "")
+                            + f" ({row['retrieved_at']})"
+                        ),
                     )
                     for _, row in datasets.iterrows()
                 ]
@@ -290,7 +420,10 @@ def data_view_page(page: ft.Page) -> ft.Control:
             controls=[
                 ft.Row([
                     ft.Text("説明変数（マクロ経済指標）", size=20, weight=ft.FontWeight.BOLD),
-                    ft.ElevatedButton("新規CSVインポート", icon=ft.Icons.UPLOAD_FILE, on_click=pick_csv),
+                    ft.Row([
+                        fiscal_year_dd, fiscal_month_dd,
+                        ft.ElevatedButton("CSVインポート", icon=ft.Icons.UPLOAD_FILE, on_click=pick_csv),
+                    ], spacing=8),
                 ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                 ft.Row([progress_bar, import_status]),
                 ft.Row([dataset_dropdown, freq_dropdown]),
@@ -364,8 +497,9 @@ def data_view_page(page: ft.Page) -> ft.Control:
 
         def on_t_name_dialog_close(e):
             t_name_dialog_result[0] = e.control.data
-            t_name_dialog_event.set()
             page.pop_dialog()
+            page.update()
+            t_name_dialog_event.set()
 
         t_name_dialog = ft.AlertDialog(
             modal=True,
@@ -463,7 +597,7 @@ def data_view_page(page: ft.Page) -> ft.Control:
 
         async def pick_target_csv(e):
             files = await t_file_picker.pick_files(allow_multiple=False, allowed_extensions=["csv"])
-            if files:
+            if files and files[0].path:
                 ds_name = t_dataset_name_input.value or f"{date.today().strftime('%Y年%m月')} {t_type_dropdown.value.upper()}実績"
                 t_progress_bar.visible = True
                 t_progress_bar.value = 0

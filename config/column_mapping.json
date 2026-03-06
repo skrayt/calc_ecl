@@ -34,6 +34,27 @@
       "unit": "百万円",
       "base_year": "2015",
       "frequency": "fiscal_year"
+    },
+    "日経平均株価【円】": {
+      "code": "nikkei_heikin",
+      "name": "日経平均株価",
+      "unit": "円",
+      "base_year": null,
+      "frequency": "monthly"
+    },
+    "消費者物価指数（総合）2020年基準": {
+      "code": "shouhisya_bukka",
+      "name": "消費者物価指数（総合）2020年基準",
+      "unit": null,
+      "base_year": "2020",
+      "frequency": "monthly"
+    },
+    "景気動向指数（先行）2020年基準": {
+      "code": "keiki_doukou",
+      "name": "景気動向指数（先行）2020年基準",
+      "unit": null,
+      "base_year": "2020",
+      "frequency": "monthly"
     }
   },
   "skip_columns": [

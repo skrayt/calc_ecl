@@ -22,11 +22,11 @@ def list_datasets(active_only: bool = True) -> pd.DataFrame:
     Returns
     -------
     pd.DataFrame
-        カラム: dataset_id, dataset_name, retrieved_at, indicator_keys,
-                description, is_active, created_at
+        カラム: dataset_id, dataset_name, retrieved_at, fiscal_year_month,
+                indicator_keys, description, is_active, created_at
     """
     query = """
-        SELECT dataset_id, dataset_name, retrieved_at,
+        SELECT dataset_id, dataset_name, retrieved_at, fiscal_year_month,
                indicator_keys, description, is_active, created_at
         FROM indicator_datasets
     """
@@ -43,6 +43,32 @@ def list_datasets(active_only: bool = True) -> pd.DataFrame:
                 lambda v: json.loads(v) if isinstance(v, str) else v
             )
         return df
+    finally:
+        conn.close()
+
+
+def find_dataset_by_fiscal_ym(fiscal_year_month) -> dict | None:
+    """決算年月でデータセットを検索する。
+
+    Parameters
+    ----------
+    fiscal_year_month : date
+        決算年月（月初日）
+
+    Returns
+    -------
+    dict or None
+        存在すれば {"dataset_id": int, "dataset_name": str}、なければ None
+    """
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT dataset_id, dataset_name FROM indicator_datasets WHERE fiscal_year_month = %s",
+                (fiscal_year_month,),
+            )
+            row = cur.fetchone()
+            return {"dataset_id": row[0], "dataset_name": row[1]} if row else None
     finally:
         conn.close()
 
