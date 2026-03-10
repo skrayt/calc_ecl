@@ -386,13 +386,23 @@ def data_view_page(page: ft.Page) -> ft.Control:
 
         def _update_checkboxes(columns):
             c2n = code_to_name_ref[0]
-            indicator_checkboxes.controls = [
-                ft.Checkbox(label=c2n.get(col, col), data=col, value=True)
+            checkboxes = [
+                ft.Checkbox(label=c2n.get(col, col), data=col, value=True, expand=True)
                 for col in columns
             ]
+            rows = []
+            for i in range(0, len(checkboxes), 3):
+                row_items = checkboxes[i:i + 3]
+                while len(row_items) < 3:
+                    row_items.append(ft.Container(expand=True))
+                rows.append(ft.Row(controls=row_items, spacing=4))
+            indicator_checkboxes.controls = rows
 
         def on_plot_click():
-            selected = [cb.data for cb in indicator_checkboxes.controls if cb.value]
+            selected = [
+                cb.data for row in indicator_checkboxes.controls
+                for cb in row.controls if isinstance(cb, ft.Checkbox) and cb.value
+            ]
             if not selected:
                 return
             plot_container.controls.clear()
@@ -433,7 +443,10 @@ def data_view_page(page: ft.Page) -> ft.Control:
                 data_table_container,
                 ft.Divider(),
                 ft.Text("時系列グラフ表示", size=16, weight=ft.FontWeight.BOLD),
-                ft.Container(content=indicator_checkboxes, height=150, border=ft.border.all(1, ft.Colors.GREY_300), padding=8),
+                ft.Container(
+                    content=ft.Column(controls=[indicator_checkboxes], scroll=ft.ScrollMode.AUTO),
+                    height=200, border=ft.border.all(1, ft.Colors.GREY_300), padding=8,
+                ),
                 plot_button,
                 plot_container,
             ],
@@ -752,13 +765,23 @@ def data_view_page(page: ft.Page) -> ft.Control:
 
         def _update_t_checkboxes(columns):
             c2n = target_code_to_name_ref[0]
-            t_checkboxes.controls = [
-                ft.Checkbox(label=c2n.get(col, col), data=col, value=True)
+            checkboxes = [
+                ft.Checkbox(label=c2n.get(col, col), data=col, value=True, expand=True)
                 for col in columns
             ]
+            rows = []
+            for i in range(0, len(checkboxes), 3):
+                row_items = checkboxes[i:i + 3]
+                while len(row_items) < 3:
+                    row_items.append(ft.Container(expand=True))
+                rows.append(ft.Row(controls=row_items, spacing=4))
+            t_checkboxes.controls = rows
 
         def on_t_plot_click():
-            selected = [cb.data for cb in t_checkboxes.controls if cb.value]
+            selected = [
+                cb.data for row in t_checkboxes.controls
+                for cb in row.controls if isinstance(cb, ft.Checkbox) and cb.value
+            ]
             if not selected:
                 return
             t_plot_container.controls.clear()
@@ -797,7 +820,10 @@ def data_view_page(page: ft.Page) -> ft.Control:
                 t_data_table_container,
                 ft.Divider(),
                 ft.Text("時系列グラフ表示", size=16, weight=ft.FontWeight.BOLD),
-                ft.Container(content=t_checkboxes, height=150, border=ft.border.all(1, ft.Colors.GREY_300), padding=8),
+                ft.Container(
+                    content=ft.Column(controls=[t_checkboxes], scroll=ft.ScrollMode.AUTO),
+                    height=200, border=ft.border.all(1, ft.Colors.GREY_300), padding=8,
+                ),
                 t_plot_button,
                 t_plot_container,
             ],
