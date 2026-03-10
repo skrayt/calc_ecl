@@ -16,7 +16,7 @@ IFRS9/ECLモデルの将来予想に必要な統計分析機能をFlet GUIアプ
 | Phase 2 | 分析ロジック（data_transform / correlation / regression / model_selection / arima） | **完了** |
 | Phase 3 | Flet GUIアプリ構築（タブ①〜⑦） | **完了** |
 | Phase 4 | ドキュメント更新 | **完了** |
-| **Phase 6A** | **バグ修正・緊急改善** | **未着手** |
+| **Phase 6A** | **バグ修正・緊急改善** | **完了** |
 | **Phase 6B** | **UI統一（説明変数選択欄の全ページ統一）** | **未着手** |
 | **Phase 6C** | **変数別変換・ラグ設定の統合（設計変更）** | **未着手** |
 | **Phase 6D** | **データ閲覧拡張（比較プロット・インポート改善）** | **未着手** |
@@ -70,20 +70,21 @@ IFRS9/ECLモデルの将来予想に必要な統計分析機能をFlet GUIアプ
 
 ---
 
-## Phase 6A: バグ修正・緊急改善
-
-**対象ファイル:** `pages/page_regression.py`, `pages/page_model_selection.py`, `pages/page_arima.py`, `pages/page_data_view.py`
+## Phase 6A: バグ修正・緊急改善 【完了 2026-03-10 commit: 5263cc9】
 
 ### 修正項目一覧
 
-| # | 対象ページ | 問題 | 修正内容 |
-|---|-----------|------|---------|
-| A-1 | 回帰分析 | 残差ヒストグラムのラベルが「時系列残差プロット」になっている | ラベルを「残差の分布（ヒストグラム）」に修正 |
-| A-2 | 回帰分析 | MSE標準偏差・各foldのMSEが表示されていない | 交差検証結果テーブルにfold別MSE・標準偏差を追加表示 |
-| A-3 | モデル選択 | VIF<=10フィルタのトグルが機能しない | filter_models()の呼び出しとUI更新のロジックを修正 |
-| A-4 | ARIMA | nlagsデフォルト値20がデータ数40未満で使えない | デフォルト値を削除（Noneで自動）＋自由入力フィールドを追加 |
-| A-5 | データ閲覧 | 目的変数タブのデータセット名・タイプ・単位フィールドの機能確認 | 実際にDBに保存/表示されているか検証し、未使用なら削除 or 説明追記 |
-| A-6 | データ閲覧 | セグメント情報の利用状況確認 | 絞り込みに使っているか確認し、使っていなければ将来対応として整理 |
+| # | 対象ファイル | 問題 | 修正内容 | 状態 |
+|---|-----------|------|---------|------|
+| A-1 | `components/plot_utils.py` | マニュアル記載の「時系列残差プロット」がGUIに存在しなかった | `plot_residuals` を3プロット構成に変更（左: 残差vs予測値 / 中: **時系列残差プロット** / 右: 残差ヒストグラム） | **完了** |
+| A-1 | `pages/page_regression.py` | セクション見出し「残差プロット」が内容を示さない | 見出しを「残差プロット（左: 残差vs予測値 ／ 中: 時系列残差 ／ 右: 残差ヒストグラム）」に更新 | **完了** |
+| A-2 | `pages/page_regression.py` | 各fold MSE・標準偏差が非表示 | fold別MSEテーブルと解釈注釈を追加 | **完了** |
+| A-3 | `pages/page_model_selection.py` | VIFフィルタがDW条件も誤適用（デフォルト引数の罠） | `filter_models(min_dw=None, max_dw=None)` で修正 | **完了** |
+| A-3 | `pages/page_model_selection.py` | 分析後にprogress_textが「全数/全数」のまま残留 | 分析完了後に `progress_text.value = ""` でクリア | **完了** |
+| A-3 | `pages/page_model_selection.py` | トグル切替後に再実行しないとフィルタが反映されない | `on_vif_toggle` ハンドラを追加し即時再フィルタリング | **完了** |
+| A-3 | `pages/page_model_selection.py` | features列が英語コードのみ・一行表示 | 日本語変数名・改行表示に変更。Adj.R²・max_VIF・F p値に色付け | **完了** |
+| A-4 | `pages/page_arima.py` | nlags固定値20がデータ数40未満で失敗 | UIにnlags入力フィールドを追加（空欄でデータ数÷3の自動算出） | **完了** |
+| A-5/A-6 | `pages/page_data_view.py` | 目的変数タブのフィールド機能確認・セグメント利用確認 | **未着手**（6D拡張と同時に対応予定） | 保留 |
 
 ---
 
