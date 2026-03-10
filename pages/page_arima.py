@@ -16,6 +16,7 @@ from src.analysis.arima import (
     test_stationarity,
     calc_acf_pacf,
 )
+from src.db_operations import save_arima_forecast
 
 
 def arima_page(page: ft.Page) -> ft.Control:
@@ -63,6 +64,74 @@ def arima_page(page: ft.Page) -> ft.Control:
     progress_bar = ft.ProgressBar(visible=False)
     progress_text = ft.Text("", size=11)
     result_container = ft.Column(scroll=ft.ScrollMode.AUTO)
+
+    # 最後に実行したARIMA予測の状態を保持する
+    last_forecast_ref = [None]
+    # {"indicator_code": str, "order": tuple, "steps": int, "fc_df": pd.DataFrame}
+
+    # 予測結果保存UI
+    save_note_input = ft.TextField(
+        label="メモ（任意）",
+        hint_text="例: 2026年度 ベースシナリオ用",
+        width=300,
+    )
+    save_status_text = ft.Text("", size=12)
+    save_section = ft.Container(
+        visible=False,
+        content=ft.Column([
+            ft.Text("予測結果をDBに保存", size=14, weight=ft.FontWeight.BOLD),
+            save_note_input,
+            ft.Row([
+                ft.ElevatedButton(
+                    "DBに保存",
+                    icon=ft.Icons.SAVE,
+                    on_click=lambda e: _save_forecast(e),
+                ),
+                save_status_text,
+            ]),
+        ]),
+        padding=10,
+        border=ft.border.all(1, ft.Colors.GREEN_200),
+        border_radius=8,
+        bgcolor=ft.Colors.GREEN_50,
+        margin=ft.margin.only(top=8),
+    )
+
+    def _save_forecast(e):
+        """ARIMA予測結果をDBに保存する"""
+        state = last_forecast_ref[0]
+        if state is None:
+            save_status_text.value = "保存するARIMA予測結果がありません。先に予測を実行してください。"
+            save_status_text.color = ft.Colors.RED_700
+            page.update()
+            return
+
+        fc_df = state["fc_df"]
+        try:
+            forecast_data = {
+                "index": [str(i) for i in fc_df.index],
+                "forecast": [float(v) for v in fc_df["forecast"]],
+                "lower": [float(v) for v in fc_df["lower"]],
+                "upper": [float(v) for v in fc_df["upper"]],
+            }
+            dataset_id = page.session.store.get("dataset_id")
+
+            forecast_dict = {
+                "indicator_code": state["indicator_code"],
+                "dataset_id": int(dataset_id) if dataset_id else None,
+                "frequency": page.session.store.get("frequency") or "",
+                "arima_order": str(state["order"]),
+                "forecast_steps": state["steps"],
+                "forecast_data": forecast_data,
+                "note": save_note_input.value or "",
+            }
+            fid = save_arima_forecast(forecast_dict)
+            save_status_text.value = f"✓ 保存しました（forecast_id: {fid}）"
+            save_status_text.color = ft.Colors.GREEN_700
+        except Exception as ex:
+            save_status_text.value = f"保存エラー: {ex}"
+            save_status_text.color = ft.Colors.RED_700
+        page.update()
 
     def run_adf_test(e):
         """ADF検定を実行する"""
@@ -227,6 +296,37 @@ def arima_page(page: ft.Page) -> ft.Control:
             results.append(ft.Divider())
             results.append(ft.Text(f"将来予測（{steps}期先）", size=16, weight=ft.FontWeight.BOLD))
             results.append(ft.Image(src="data:image/png;base64," + img, fit=ft.BoxFit.CONTAIN))
+
+            # 予測値テーブルを表示
+            fc_rows = []
+            for idx, row in fc.iterrows():
+                fc_rows.append(ft.DataRow(cells=[
+                    ft.DataCell(ft.Text(str(idx)[:10])),
+                    ft.DataCell(ft.Text(f"{row['forecast']:.4f}")),
+                    ft.DataCell(ft.Text(f"{row['lower']:.4f}")),
+                    ft.DataCell(ft.Text(f"{row['upper']:.4f}")),
+                ]))
+            results.append(ft.DataTable(
+                columns=[
+                    ft.DataColumn(ft.Text("時点")),
+                    ft.DataColumn(ft.Text("予測値")),
+                    ft.DataColumn(ft.Text("下限（楽観参考）")),
+                    ft.DataColumn(ft.Text("上限（悲観参考）")),
+                ],
+                rows=fc_rows,
+                border=ft.border.all(1, ft.Colors.GREY_300),
+            ))
+
+            # 最後の予測状態を保存し、保存ボタンセクションを表示
+            last_forecast_ref[0] = {
+                "indicator_code": target_dropdown.value,
+                "order": order,
+                "steps": steps,
+                "fc_df": fc,
+            }
+            save_status_text.value = ""
+            save_section.visible = True
+
         except Exception as ex:
             results.append(ft.Text(f"予測エラー: {ex}", color=ft.Colors.ORANGE_700))
 
@@ -301,6 +401,7 @@ def arima_page(page: ft.Page) -> ft.Control:
             ft.ElevatedButton("自動選択実行", on_click=run_auto_select, icon=ft.Icons.AUTO_FIX_HIGH),
             ft.Divider(),
             result_container,
+            save_section,
         ],
         spacing=10,
         expand=True,

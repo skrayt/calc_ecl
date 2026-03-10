@@ -21,13 +21,13 @@ IFRS9/ECLモデルの将来予想に必要な統計分析機能をFlet GUIアプ
 | **Phase 6C** | **変数別変換・ラグ設定の統合（設計変更）** | **完了** |
 | **Phase 6D** | **データ閲覧拡張（比較プロット・インポート改善）** | **完了（①②のみ。③インポートモード選択は後回し）** |
 | **Phase 6E** | **ARIMA改善** | **完了（E-1のみ。E-2はPhase 5-6で対応）** |
-| **Phase 6F** | **解釈説明・マニュアル充実** | **未着手** |
-| Phase 5-1 | DB拡張（ECL計算用テーブル） | **未着手** |
-| Phase 5-2 | src/analysis/ecl.py（ECL計算コアロジック） | **未着手** |
-| Phase 5-3 | src/db_operations.py 拡張 | **未着手** |
-| Phase 5-4 | page_arima.py 拡張（予測結果の保存機能） | **未着手** |
-| Phase 5-5 | page_model_confirm.py（⑦モデル確定タブ） | **未着手** |
-| Phase 5-6 | page_ecl.py（⑧ECL計算タブ） | **未着手** |
+| **Phase 6F** | **解釈説明・マニュアル充実** | **完了** |
+| Phase 5-1 | DB拡張（ECL計算用テーブル） | **完了** |
+| Phase 5-2 | src/analysis/ecl.py（ECL計算コアロジック） | **完了** |
+| Phase 5-3 | src/db_operations.py 拡張 | **完了** |
+| Phase 5-4 | page_arima.py 拡張（予測結果の保存機能） | **完了** |
+| Phase 5-5 | page_model_confirm.py（⑦モデル確定タブ） | **完了** |
+| Phase 5-6 | page_ecl.py（⑧ECL計算タブ） | **完了** |
 | Phase 5-7 | ドキュメント更新（Phase 5完了後） | **未着手** |
 
 **実装順序: Phase 6A → 6B → 6C → 6D → 6E → 6F → Phase 5**

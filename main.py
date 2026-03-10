@@ -11,6 +11,8 @@ from pages.page_model_selection import model_selection_page
 from pages.page_dynamic_regression import dynamic_regression_page
 from pages.page_arima import arima_page
 from pages.page_forecast import forecast_page
+from pages.page_model_confirm import model_confirm_page
+from pages.page_ecl import ecl_page
 
 
 def main(page: ft.Page):
@@ -55,6 +57,10 @@ def main(page: ft.Page):
                 body.controls.append(arima_page(page))
             elif selected == 6:
                 body.controls.append(forecast_page(page))
+            elif selected == 7:
+                body.controls.append(model_confirm_page(page))
+            elif selected == 8:
+                body.controls.append(ecl_page(page))
         except Exception as ex:
             print(f"DEBUG: タブ{selected}のロードエラー: {ex}")
             body.controls.append(
@@ -73,6 +79,8 @@ def main(page: ft.Page):
             ft.Tab(label="⑤ 動的回帰"),
             ft.Tab(label="⑥ ARIMA"),
             ft.Tab(label="⑦ 将来シナリオ"),
+            ft.Tab(label="⑧ モデル確定"),
+            ft.Tab(label="⑨ ECL計算"),
         ],
         # on_click は設定しない（Tabs.on_change と二重発火するため）
     )
@@ -83,7 +91,7 @@ def main(page: ft.Page):
     # Tabs コントローラー（TabBarを内包する必要がある）
     # expand=True で画面高さいっぱいに広げることで、body の scroll が機能する
     tabs_ctrl = ft.Tabs(
-        length=7,
+        length=9,
         selected_index=0,
         on_change=on_tab_change,
         expand=True,
