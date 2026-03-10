@@ -221,6 +221,92 @@ def plot_time_series_grid(
     return fig_to_base64(fig)
 
 
+def plot_compare_series(
+    series_list: list[pd.Series],
+    labels: list[str],
+    normalize: bool = False,
+    dual_axis: bool = False,
+    figsize: tuple = DEFAULT_FIGSIZE,
+) -> str:
+    """複数の時系列を1グラフに重ねて比較プロットする
+
+    Parameters
+    ----------
+    series_list : list[pd.Series]
+        プロットするSeries（DatetimeIndex）のリスト
+    labels : list[str]
+        各Seriesの表示名
+    normalize : bool
+        True のとき各系列を0-1に正規化して比較する
+    dual_axis : bool
+        True のとき先頭系列を左軸、残りを右軸に表示する（正規化と排他）
+    figsize : tuple
+        グラフサイズ
+
+    Returns
+    -------
+    str
+        base64エンコードされたPNG画像
+    """
+    if not series_list:
+        return ""
+
+    colors = sns.color_palette("tab10", len(series_list))
+    fig, ax1 = plt.subplots(figsize=figsize)
+
+    if normalize:
+        # 各系列を0-1スケールに正規化
+        for series, label, color in zip(series_list, labels, colors):
+            s = series.dropna()
+            if s.empty:
+                continue
+            mn, mx = s.min(), s.max()
+            norm = (s - mn) / (mx - mn) if mx != mn else s * 0
+            ax1.plot(norm.index, norm.values, label=f"{label} (正規化)", color=color)
+        ax1.set_ylabel("正規化値 (0-1)", fontsize=10)
+
+    elif dual_axis and len(series_list) >= 2:
+        # 左軸: 1本目, 右軸: 2本目以降
+        s0 = series_list[0].dropna()
+        ax1.plot(s0.index, s0.values, label=labels[0], color=colors[0])
+        ax1.set_ylabel(labels[0], fontsize=10, color=colors[0])
+        ax1.tick_params(axis="y", labelcolor=colors[0])
+
+        ax2 = ax1.twinx()
+        for series, label, color in zip(series_list[1:], labels[1:], colors[1:]):
+            s = series.dropna()
+            ax2.plot(s.index, s.values, label=label, color=color, linestyle="--")
+        ax2.set_ylabel(" / ".join(labels[1:]), fontsize=10)
+
+        # 両軸の凡例を統合
+        lines1, labels1 = ax1.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper left", fontsize=8)
+
+    else:
+        # 通常: 全系列を同一軸に重ねて表示
+        for series, label, color in zip(series_list, labels, colors):
+            s = series.dropna()
+            ax1.plot(s.index, s.values, label=label, color=color)
+        ax1.set_ylabel("値", fontsize=10)
+
+    ax1.set_xlabel("日付", fontsize=10)
+    ax1.tick_params(axis="x", rotation=45, labelsize=8)
+    ax1.grid(True, linestyle="--", alpha=0.5)
+
+    if not dual_axis or len(series_list) < 2:
+        ax1.legend(loc="upper left", fontsize=8)
+
+    title = "比較プロット"
+    if normalize:
+        title += "（正規化）"
+    elif dual_axis:
+        title += "（2軸表示）"
+    ax1.set_title(title, fontsize=13)
+    fig.tight_layout()
+    return fig_to_base64(fig)
+
+
 def plot_correlation_heatmap(
     corr_matrix: pd.DataFrame,
     title: str = "相関行列ヒートマップ",

@@ -20,7 +20,8 @@ from src.data.indicator_loader import (
     load_targets,
     get_target_definitions,
 )
-from components.plot_utils import plot_single_series
+from components.plot_utils import plot_single_series, plot_compare_series
+from src.analysis.data_transform import transform, TRANSFORM_METHODS
 from src.import_indicators import (
     import_csv_gui,
     detect_unknown_columns,
@@ -33,6 +34,16 @@ from components.help_panel import build_help_panel
 def data_view_page(page: ft.Page) -> ft.Control:
     """データ閲覧タブのUIを構築する"""
     print("DEBUG: データ閲覧ページ構築開始")
+
+    # =========================================================
+    # 比較プロット用の共有データ参照（両タブを横断）
+    # =========================================================
+    shared = {
+        "ind_df": None,
+        "ind_c2n": {},
+        "tgt_df": None,
+        "tgt_c2n": {},
+    }
 
     # =========================================================
     # 説明変数タブ
@@ -59,6 +70,17 @@ def data_view_page(page: ft.Page) -> ft.Control:
             "選択した指標をプロット",
             on_click=lambda e: on_plot_click(),
             disabled=True,
+        )
+        transform_dropdown = ft.Dropdown(
+            label="変換方法",
+            options=[ft.dropdown.Option(key=k, text=v) for k, v in TRANSFORM_METHODS.items()],
+            value="none", width=200,
+        )
+        transform_plot_button = ft.ElevatedButton(
+            "変換してプロット",
+            on_click=lambda e: on_transform_plot_click(),
+            disabled=True,
+            icon=ft.Icons.TRANSFORM,
         )
 
         # インポート関連UI
@@ -314,6 +336,9 @@ def data_view_page(page: ft.Page) -> ft.Control:
                 if not df.empty:
                     defs = get_indicator_definitions(df.columns.tolist())
                     code_to_name_ref[0] = dict(zip(defs["indicator_code"], defs["indicator_name"]))
+                # 比較プロット用に共有参照を更新
+                shared["ind_df"] = df
+                shared["ind_c2n"] = code_to_name_ref[0]
                 page.session.store.set("df", df)
                 status_text.value = (
                     f"ID: {dataset_id} | {frequency} | "
@@ -323,6 +348,7 @@ def data_view_page(page: ft.Page) -> ft.Control:
                 _update_data_table(df)
                 _update_checkboxes(df.columns.tolist())
                 plot_button.disabled = False
+                transform_plot_button.disabled = False
                 plot_container.controls.clear()
                 page.update()
             except Exception as ex:
@@ -426,6 +452,44 @@ def data_view_page(page: ft.Page) -> ft.Control:
                 plot_container.controls.append(ft.Row(controls=row_controls, spacing=4))
             page.update()
 
+        def on_transform_plot_click():
+            """変換後の時系列グラフをプロットする"""
+            df = current_df_ref[0]
+            if df is None or df.empty:
+                return
+            selected = [
+                cb.data for row in indicator_checkboxes.controls
+                for cb in row.controls if isinstance(cb, ft.Checkbox) and cb.value
+            ]
+            if not selected:
+                return
+            method = transform_dropdown.value or "none"
+            plot_container.controls.clear()
+            c2n = code_to_name_ref[0]
+            N_COLS = 3
+            row_controls = []
+            for col in selected:
+                label = c2n.get(col, col)
+                try:
+                    transformed = transform(df[[col]].copy(), method=method)
+                    img = plot_single_series(
+                        transformed, col,
+                        label=f"{label}（{TRANSFORM_METHODS.get(method, method)}）",
+                        figsize=(5, 3),
+                    )
+                    cell = ft.Image(src="data:image/png;base64," + img, fit=ft.BoxFit.CONTAIN, expand=True)
+                except Exception as ex:
+                    cell = ft.Text(f"{label}: エラー: {ex}", color=ft.Colors.RED_700, expand=True)
+                row_controls.append(cell)
+                if len(row_controls) == N_COLS:
+                    plot_container.controls.append(ft.Row(controls=row_controls, spacing=4))
+                    row_controls = []
+            if row_controls:
+                while len(row_controls) < N_COLS:
+                    row_controls.append(ft.Container(expand=True))
+                plot_container.controls.append(ft.Row(controls=row_controls, spacing=4))
+            page.update()
+
         layout = ft.Column(
             controls=[
                 ft.Row([
@@ -448,6 +512,7 @@ def data_view_page(page: ft.Page) -> ft.Control:
                     height=200, border=ft.border.all(1, ft.Colors.GREY_300), padding=8,
                 ),
                 plot_button,
+                ft.Row([transform_dropdown, transform_plot_button], spacing=8),
                 plot_container,
             ],
             spacing=10,
@@ -485,6 +550,17 @@ def data_view_page(page: ft.Page) -> ft.Control:
             "選択した目的変数をプロット",
             on_click=lambda e: on_t_plot_click(),
             disabled=True,
+        )
+        t_transform_dropdown = ft.Dropdown(
+            label="変換方法",
+            options=[ft.dropdown.Option(key=k, text=v) for k, v in TRANSFORM_METHODS.items()],
+            value="none", width=200,
+        )
+        t_transform_plot_button = ft.ElevatedButton(
+            "変換してプロット",
+            on_click=lambda e: on_t_transform_plot_click(),
+            disabled=True,
+            icon=ft.Icons.TRANSFORM,
         )
 
         # インポート関連UI
@@ -694,6 +770,9 @@ def data_view_page(page: ft.Page) -> ft.Control:
                 if not df.empty:
                     defs = get_target_definitions(df.columns.tolist())
                     target_code_to_name_ref[0] = dict(zip(defs["target_code"], defs["target_name"]))
+                # 比較プロット用に共有参照を更新
+                shared["tgt_df"] = df
+                shared["tgt_c2n"] = target_code_to_name_ref[0]
                 # セッションストアに保存（分析ページで使用）
                 page.session.store.set("target_df", df)
                 page.session.store.set("target_dataset_id", target_dataset_id)
@@ -707,6 +786,7 @@ def data_view_page(page: ft.Page) -> ft.Control:
                 _update_t_data_table(df)
                 _update_t_checkboxes(df.columns.tolist())
                 t_plot_button.disabled = False
+                t_transform_plot_button.disabled = False
                 t_plot_container.controls.clear()
                 page.update()
             except Exception as ex:
@@ -805,6 +885,44 @@ def data_view_page(page: ft.Page) -> ft.Control:
                 t_plot_container.controls.append(ft.Row(controls=row_controls, spacing=4))
             page.update()
 
+        def on_t_transform_plot_click():
+            """変換後の目的変数グラフをプロットする"""
+            df = current_target_df_ref[0]
+            if df is None or df.empty:
+                return
+            selected = [
+                cb.data for row in t_checkboxes.controls
+                for cb in row.controls if isinstance(cb, ft.Checkbox) and cb.value
+            ]
+            if not selected:
+                return
+            method = t_transform_dropdown.value or "none"
+            t_plot_container.controls.clear()
+            c2n = target_code_to_name_ref[0]
+            N_COLS = 3
+            row_controls = []
+            for col in selected:
+                label = c2n.get(col, col)
+                try:
+                    transformed = transform(df[[col]].copy(), method=method)
+                    img = plot_single_series(
+                        transformed, col,
+                        label=f"{label}（{TRANSFORM_METHODS.get(method, method)}）",
+                        figsize=(5, 3),
+                    )
+                    cell = ft.Image(src="data:image/png;base64," + img, fit=ft.BoxFit.CONTAIN, expand=True)
+                except Exception as ex:
+                    cell = ft.Text(f"{label}: エラー: {ex}", color=ft.Colors.RED_700, expand=True)
+                row_controls.append(cell)
+                if len(row_controls) == N_COLS:
+                    t_plot_container.controls.append(ft.Row(controls=row_controls, spacing=4))
+                    row_controls = []
+            if row_controls:
+                while len(row_controls) < N_COLS:
+                    row_controls.append(ft.Container(expand=True))
+                t_plot_container.controls.append(ft.Row(controls=row_controls, spacing=4))
+            page.update()
+
         layout = ft.Column(
             controls=[
                 ft.Row([
@@ -825,6 +943,7 @@ def data_view_page(page: ft.Page) -> ft.Control:
                     height=200, border=ft.border.all(1, ft.Colors.GREY_300), padding=8,
                 ),
                 t_plot_button,
+                ft.Row([t_transform_dropdown, t_transform_plot_button], spacing=8),
                 t_plot_container,
             ],
             spacing=10,
@@ -832,6 +951,182 @@ def data_view_page(page: ft.Page) -> ft.Control:
 
         load_target_datasets_list()
         return layout
+
+    # =========================================================
+    # 比較プロットタブ
+    # =========================================================
+    def _build_compare_tab():
+        """説明変数と目的変数を重ねてプロットする比較タブ"""
+        compare_plot_container = ft.Column()
+        compare_status = ft.Text("説明変数・目的変数の両タブでデータを読み込んでから使用してください", size=12, color=ft.Colors.GREY_600)
+
+        # 説明変数側チェックボックス
+        ind_checkboxes_col = ft.Column(spacing=2)
+        # 目的変数側チェックボックス
+        tgt_checkboxes_col = ft.Column(spacing=2)
+
+        normalize_switch = ft.Switch(label="0-1正規化（スケール統一）", value=True)
+        dual_axis_switch = ft.Switch(label="2軸プロット（目的変数を右軸）", value=False)
+
+        refresh_button = ft.ElevatedButton(
+            "変数リストを更新",
+            icon=ft.Icons.REFRESH,
+            on_click=lambda e: _refresh_compare_lists(),
+        )
+        plot_compare_button = ft.ElevatedButton(
+            "比較プロット実行",
+            icon=ft.Icons.SHOW_CHART,
+            on_click=lambda e: _run_compare_plot(),
+        )
+
+        def _refresh_compare_lists():
+            """共有データから変数チェックボックスを再構築する"""
+            ind_df = shared["ind_df"]
+            ind_c2n = shared["ind_c2n"]
+            tgt_df = shared["tgt_df"]
+            tgt_c2n = shared["tgt_c2n"]
+
+            if ind_df is None or ind_df.empty:
+                compare_status.value = "説明変数データが読み込まれていません。①説明変数データタブでデータを選択してください。"
+                compare_status.color = ft.Colors.ORANGE_700
+                page.update()
+                return
+
+            # 説明変数チェックボックス
+            ind_cbs = [
+                ft.Checkbox(label=ind_c2n.get(col, col), data=col, value=False, expand=True)
+                for col in ind_df.columns
+            ]
+            rows = []
+            for i in range(0, len(ind_cbs), 3):
+                row_items = ind_cbs[i:i + 3]
+                while len(row_items) < 3:
+                    row_items.append(ft.Container(expand=True))
+                rows.append(ft.Row(controls=row_items, spacing=4))
+            ind_checkboxes_col.controls = rows
+
+            # 目的変数チェックボックス
+            if tgt_df is not None and not tgt_df.empty:
+                tgt_cbs = [
+                    ft.Checkbox(label=tgt_c2n.get(col, col), data=col, value=True, expand=True)
+                    for col in tgt_df.columns
+                ]
+                tgt_rows = []
+                for i in range(0, len(tgt_cbs), 3):
+                    row_items = tgt_cbs[i:i + 3]
+                    while len(row_items) < 3:
+                        row_items.append(ft.Container(expand=True))
+                    tgt_rows.append(ft.Row(controls=row_items, spacing=4))
+                tgt_checkboxes_col.controls = tgt_rows
+            else:
+                tgt_checkboxes_col.controls = [
+                    ft.Text("目的変数データが読み込まれていません。②目的変数データタブでデータを選択してください。", size=11, color=ft.Colors.ORANGE_600)
+                ]
+
+            compare_status.value = "変数を選択して「比較プロット実行」を押してください"
+            compare_status.color = ft.Colors.GREEN_700
+            page.update()
+
+        def _run_compare_plot():
+            """選択した説明変数・目的変数を重ねてプロットする"""
+            ind_df = shared["ind_df"]
+            ind_c2n = shared["ind_c2n"]
+            tgt_df = shared["tgt_df"]
+            tgt_c2n = shared["tgt_c2n"]
+
+            # 説明変数の選択
+            ind_selected = [
+                cb.data for row in ind_checkboxes_col.controls
+                for cb in row.controls if isinstance(cb, ft.Checkbox) and cb.value
+            ]
+            # 目的変数の選択
+            tgt_selected = [
+                cb.data for row in tgt_checkboxes_col.controls
+                for cb in row.controls if isinstance(cb, ft.Checkbox) and cb.value
+            ]
+
+            all_selected = ind_selected + tgt_selected
+            if not all_selected:
+                compare_status.value = "比較する変数を選択してください"
+                compare_status.color = ft.Colors.ORANGE_700
+                page.update()
+                return
+
+            compare_plot_container.controls.clear()
+            compare_status.value = "プロット生成中..."
+            compare_status.color = ft.Colors.GREY_600
+            page.update()
+
+            try:
+                # 系列データと名前を組み立てる
+                series_list = []
+                labels = []
+                combined_c2n = {**ind_c2n, **tgt_c2n}
+
+                for col in ind_selected:
+                    if ind_df is not None and col in ind_df.columns:
+                        series_list.append(ind_df[col].dropna())
+                        labels.append(combined_c2n.get(col, col))
+
+                for col in tgt_selected:
+                    if tgt_df is not None and col in tgt_df.columns:
+                        series_list.append(tgt_df[col].dropna())
+                        labels.append(combined_c2n.get(col, col))
+
+                if not series_list:
+                    compare_status.value = "有効なデータがありません"
+                    compare_status.color = ft.Colors.ORANGE_700
+                    page.update()
+                    return
+
+                img = plot_compare_series(
+                    series_list=series_list,
+                    labels=labels,
+                    normalize=normalize_switch.value,
+                    dual_axis=dual_axis_switch.value,
+                    figsize=(14, 5),
+                )
+                compare_plot_container.controls.append(
+                    ft.Image(src="data:image/png;base64," + img, fit=ft.BoxFit.CONTAIN)
+                )
+                compare_status.value = f"{len(series_list)}系列をプロットしました"
+                compare_status.color = ft.Colors.GREEN_700
+            except Exception as ex:
+                compare_status.value = f"プロットエラー: {ex}"
+                compare_status.color = ft.Colors.RED_700
+
+            page.update()
+
+        return ft.Column(
+            controls=[
+                ft.Text("比較プロット（説明変数 × 目的変数）", size=20, weight=ft.FontWeight.BOLD),
+                ft.Container(
+                    content=ft.Text(
+                        "①・②タブでデータを読み込んだ後、「変数リストを更新」を押してください。"
+                        "説明変数と目的変数を選択して重ね合わせプロットができます。",
+                        size=12, color=ft.Colors.BLUE_800,
+                    ),
+                    bgcolor=ft.Colors.BLUE_50, border_radius=6,
+                    padding=ft.padding.symmetric(horizontal=12, vertical=8),
+                ),
+                ft.Row([refresh_button, normalize_switch, dual_axis_switch], spacing=16),
+                compare_status,
+                ft.Divider(),
+                ft.Text("説明変数（チェックして選択）", size=14, weight=ft.FontWeight.BOLD),
+                ft.Container(
+                    content=ft.Column(controls=[ind_checkboxes_col], scroll=ft.ScrollMode.AUTO),
+                    height=150, border=ft.border.all(1, ft.Colors.GREY_300), padding=8,
+                ),
+                ft.Text("目的変数（チェックして選択）", size=14, weight=ft.FontWeight.BOLD),
+                ft.Container(
+                    content=ft.Column(controls=[tgt_checkboxes_col], scroll=ft.ScrollMode.AUTO),
+                    height=100, border=ft.border.all(1, ft.Colors.GREY_300), padding=8,
+                ),
+                plot_compare_button,
+                compare_plot_container,
+            ],
+            spacing=10,
+        )
 
     # =========================================================
     # ヘルプパネル
@@ -869,35 +1164,47 @@ def data_view_page(page: ft.Page) -> ft.Control:
     # =========================================================
     # タブ構成
     # =========================================================
+    # サブタブ: ボタン切替（TabBarは親Tabsにイベントがバブルするため不使用）
     indicator_tab_content = _build_indicator_tab()
     target_tab_content = _build_target_tab()
+    compare_tab_content = _build_compare_tab()
 
-    # サブタブ: ボタン切替（TabBarは親Tabsにイベントがバブルするため不使用）
     sub_tab_body = ft.Container(content=indicator_tab_content, padding=10)
 
-    btn_indicator = ft.ElevatedButton("説明変数データ", disabled=True)
-    btn_target = ft.OutlinedButton("目的変数データ")
+    btn_indicator = ft.ElevatedButton("① 説明変数データ", disabled=True)
+    btn_target = ft.OutlinedButton("② 目的変数データ")
+    btn_compare = ft.OutlinedButton("③ 比較プロット")
 
     def switch_to_indicator(e):
         sub_tab_body.content = indicator_tab_content
         btn_indicator.disabled = True
         btn_target.disabled = False
+        btn_compare.disabled = False
         page.update()
 
     def switch_to_target(e):
         sub_tab_body.content = target_tab_content
         btn_indicator.disabled = False
         btn_target.disabled = True
+        btn_compare.disabled = False
+        page.update()
+
+    def switch_to_compare(e):
+        sub_tab_body.content = compare_tab_content
+        btn_indicator.disabled = False
+        btn_target.disabled = False
+        btn_compare.disabled = True
         page.update()
 
     btn_indicator.on_click = switch_to_indicator
     btn_target.on_click = switch_to_target
+    btn_compare.on_click = switch_to_compare
 
     layout = ft.Column(
         controls=[
             _help,
             ft.Text("データ閲覧・管理", size=24, weight=ft.FontWeight.BOLD),
-            ft.Row([btn_indicator, btn_target], spacing=8),
+            ft.Row([btn_indicator, btn_target, btn_compare], spacing=8),
             sub_tab_body,
         ],
         spacing=10,
