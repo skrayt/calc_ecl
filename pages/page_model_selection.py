@@ -83,10 +83,29 @@ def model_selection_page(page: ft.Page) -> ft.Control:
         ],
         value="aic", width=200,
     )
+    # 全結果を保持（VIFフィルタのトグル切り替え時に再フィルタリングするため）
+    all_results_ref = [None]
+    last_target_ref = [""]
+
     vif_filter_switch = ft.Switch(label="VIF≤10のみ表示", value=False)
     progress_bar = ft.ProgressBar(visible=False)
     progress_text = ft.Text("", size=11)
     result_container = ft.Column(scroll=ft.ScrollMode.AUTO)
+
+    def on_vif_toggle(e):
+        """VIFフィルタのトグル切り替え時に即時再表示する"""
+        if all_results_ref[0] is None:
+            return
+        results_df = all_results_ref[0]
+        target = last_target_ref[0]
+        if vif_filter_switch.value:
+            display_df = filter_models(results_df, max_vif=10.0, min_dw=None, max_dw=None)
+        else:
+            display_df = results_df
+        _show_results(target, display_df, len(results_df))
+        page.update()
+
+    vif_filter_switch.on_change = on_vif_toggle
 
     def run_analysis(e):
         """分析実行"""
@@ -146,12 +165,17 @@ def model_selection_page(page: ft.Page) -> ft.Control:
                 progress_callback=progress_callback,
             )
 
-            # VIFフィルタ
+            # 全結果を保持（トグル切り替え時の再フィルタリング用）
+            all_results_ref[0] = results_df
+            last_target_ref[0] = target
+
+            # VIFフィルタ（min_dw/max_dwはNoneにしてVIFのみで絞り込む）
             display_df = results_df
             if vif_filter_switch.value:
-                display_df = filter_models(results_df, max_vif=10.0)
+                display_df = filter_models(results_df, max_vif=10.0, min_dw=None, max_dw=None)
 
             progress_bar.visible = False
+            progress_text.value = ""
             _show_results(target, display_df, len(results_df))
             print(f"DEBUG: モデル選択完了 {len(results_df)}モデル")
 
@@ -173,18 +197,48 @@ def model_selection_page(page: ft.Page) -> ft.Control:
             result_container.controls.append(ft.Text("条件に合うモデルがありません。", italic=True))
             return
 
-        display_cols = ["features", "r2", "adj_r2", "aic", "bic", "dw", "f_stat", "f_pvalue", "max_vif", "nobs"]
+        col_labels = {
+            "features": "説明変数",
+            "r2": "R²",
+            "adj_r2": "Adj.R²",
+            "aic": "AIC",
+            "bic": "BIC",
+            "dw": "DW",
+            "f_stat": "F統計量",
+            "f_pvalue": "F p値",
+            "max_vif": "最大VIF",
+            "nobs": "観測数",
+        }
+        display_cols = list(col_labels.keys())
+        c2n = code_to_name_ref[0]
+
+        def _make_cell(row, c):
+            """セルの内容と色を決定する"""
+            val = row[c]
+            if c == "features":
+                # 変数名を日本語＋改行表示
+                if isinstance(val, list):
+                    text = "\n".join(c2n.get(v, v) for v in val)
+                else:
+                    text = "\n".join(c2n.get(v.strip(), v.strip()) for v in str(val).strip("[]").split(","))
+                return ft.DataCell(ft.Text(text, size=10))
+            if c == "max_vif" and isinstance(val, float):
+                color = ft.Colors.RED_700 if val > 10 else ft.Colors.GREEN_700
+                return ft.DataCell(ft.Text(f"{val:.2f}", size=10, color=color))
+            if c == "adj_r2" and isinstance(val, float):
+                color = ft.Colors.GREEN_700 if val >= 0.7 else (ft.Colors.ORANGE_700 if val >= 0.4 else ft.Colors.RED_700)
+                return ft.DataCell(ft.Text(f"{val:.4f}", size=10, color=color))
+            if c == "f_pvalue" and isinstance(val, float):
+                color = ft.Colors.GREEN_700 if val < 0.05 else ft.Colors.RED_700
+                return ft.DataCell(ft.Text(f"{val:.4e}", size=10, color=color))
+            if isinstance(val, float):
+                return ft.DataCell(ft.Text(f"{val:.4f}", size=10))
+            return ft.DataCell(ft.Text(str(val), size=10))
+
         table = ft.DataTable(
-            columns=[ft.DataColumn(ft.Text(c, size=11)) for c in display_cols],
+            columns=[ft.DataColumn(ft.Text(col_labels[c], size=11)) for c in display_cols],
             rows=[
-                ft.DataRow(cells=[
-                    ft.DataCell(ft.Text(
-                        f"{row[c]:.4f}" if isinstance(row[c], float) else str(row[c]),
-                        size=10,
-                        color=ft.Colors.RED_700 if c == "max_vif" and isinstance(row[c], float) and row[c] > 10 else None,
-                    ))
-                    for c in display_cols
-                ])
+                ft.DataRow(cells=[_make_cell(row, c) for c in display_cols])
                 for _, row in results_df.head(50).iterrows()
             ],
             border=ft.border.all(1, ft.Colors.GREY_300),

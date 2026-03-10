@@ -178,7 +178,7 @@ def regression_page(page: ft.Page) -> ft.Control:
 
             # 残差プロット
             results.append(ft.Divider())
-            results.append(ft.Text("残差プロット", size=18, weight=ft.FontWeight.BOLD))
+            results.append(ft.Text("残差プロット（左: 残差vs予測値 ／ 中: 時系列残差 ／ 右: 残差ヒストグラム）", size=18, weight=ft.FontWeight.BOLD))
             img_resid = plot_residuals(ols["resid"], ols["fitted"])
             results.append(ft.Image(src="data:image/png;base64," + img_resid, fit=ft.BoxFit.CONTAIN))
 
@@ -188,7 +188,30 @@ def regression_page(page: ft.Page) -> ft.Control:
                 cv_result = cross_validate(y, X, cv=cv_k, lag=lag)
                 results.append(ft.Divider())
                 results.append(ft.Text("交差検証", size=18, weight=ft.FontWeight.BOLD))
-                results.append(ft.Text(f"平均MSE: {cv_result['mean_mse']:.4f} (±{cv_result['std_mse']:.4f})"))
+                results.append(ft.Text(
+                    f"平均MSE: {cv_result['mean_mse']:.4f}　標準偏差: {cv_result['std_mse']:.4f}",
+                    size=14,
+                ))
+                # 各foldのMSEテーブル
+                fold_rows = [
+                    ft.DataRow(cells=[
+                        ft.DataCell(ft.Text(f"Fold {i + 1}")),
+                        ft.DataCell(ft.Text(f"{mse:.4f}")),
+                    ])
+                    for i, mse in enumerate(cv_result["scores"])
+                ]
+                results.append(ft.DataTable(
+                    columns=[
+                        ft.DataColumn(ft.Text("Fold")),
+                        ft.DataColumn(ft.Text("MSE"), numeric=True),
+                    ],
+                    rows=fold_rows,
+                    border=ft.border.all(1, ft.Colors.GREY_300),
+                ))
+                results.append(ft.Text(
+                    "※ MSE標準偏差が平均の半分以下なら予測が安定しています。特定のFoldだけ大きい場合は外れ値や構造変化を確認してください。",
+                    size=11, italic=True, color=ft.Colors.GREY_700,
+                ))
             except Exception as cv_ex:
                 results.append(ft.Text(f"交差検証エラー: {cv_ex}", color=ft.Colors.ORANGE_700))
 

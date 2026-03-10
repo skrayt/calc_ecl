@@ -293,14 +293,14 @@ def plot_vif_heatmap(
 def plot_residuals(
     resid: pd.Series,
     fitted: pd.Series,
-    figsize: tuple = (12, 4),
+    figsize: tuple = (16, 4),
 ) -> str:
-    """残差プロット（残差vs予測値、残差ヒストグラム）
+    """残差プロット（残差vs予測値、時系列残差プロット、残差ヒストグラム）
 
     Parameters
     ----------
     resid : pd.Series
-        残差
+        残差（DatetimeIndexであれば時系列プロットに日付を使用）
     fitted : pd.Series
         予測値
     figsize : tuple
@@ -311,7 +311,7 @@ def plot_residuals(
     str
         base64エンコードされたPNG画像
     """
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=figsize)
 
     # 残差 vs 予測値
     ax1.scatter(fitted, resid, alpha=0.5, s=20)
@@ -321,12 +321,21 @@ def plot_residuals(
     ax1.set_ylabel("残差", fontsize=10)
     ax1.grid(True, linestyle="--", alpha=0.5)
 
-    # 残差ヒストグラム
-    ax2.hist(resid, bins=20, edgecolor="white", alpha=0.7)
-    ax2.set_title("残差ヒストグラム", fontsize=12)
-    ax2.set_xlabel("残差", fontsize=10)
-    ax2.set_ylabel("頻度", fontsize=10)
+    # 時系列残差プロット
+    ax2.plot(resid.index, resid.values, color="steelblue", linewidth=1.0)
+    ax2.axhline(y=0, color="red", linestyle="--", alpha=0.7)
+    ax2.set_title("時系列残差プロット", fontsize=12)
+    ax2.set_xlabel("日付", fontsize=10)
+    ax2.set_ylabel("残差", fontsize=10)
+    ax2.tick_params(axis="x", rotation=45, labelsize=7)
     ax2.grid(True, linestyle="--", alpha=0.5)
+
+    # 残差ヒストグラム
+    ax3.hist(resid, bins=20, edgecolor="white", alpha=0.7)
+    ax3.set_title("残差ヒストグラム", fontsize=12)
+    ax3.set_xlabel("残差", fontsize=10)
+    ax3.set_ylabel("頻度", fontsize=10)
+    ax3.grid(True, linestyle="--", alpha=0.5)
 
     fig.tight_layout()
     return fig_to_base64(fig)

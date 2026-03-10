@@ -3,12 +3,8 @@
 ## 概要
 
 IFRS9/ECLモデルの将来予想に必要な統計分析機能をFlet GUIアプリとして実装する。
-Craft_RegressionAnalysis（`../Craft_RegressionAnalysis/`）の統計分析ロジックを
-UI非依存の形で抽出・再利用し、UIはFletで新規構築する。
 
 **本番環境: WinPython64-3.12.4.1（オフライン）**
-- psycopg2はwheelファイルを持ち込んでインストール
-- statsmodels, scikit-learn, numpy, scipy, pandas, matplotlib, flet: WinPython同梱済み
 
 ---
 
@@ -16,415 +12,420 @@ UI非依存の形で抽出・再利用し、UIはFletで新規構築する。
 
 | Phase | 内容 | 状態 |
 |-------|------|------|
-| Phase 1 | 基盤更新（requirements, CLAUDE.md） | **完了** |
-| Phase 2-1 | indicator_loader（DB→DataFrame） | **完了** |
-| Phase 2-2 | data_transform（データ変換） | **完了** |
-| Phase 2-3 | correlation（相関分析・VIF） | **完了** |
-| Phase 2-4 | regression（OLS回帰） | **完了** |
-| Phase 2-5 | model_selection（組み合わせ探索） | **完了** |
-| Phase 2-6 | arima（ARIMA時系列モデル） | **完了** |
+| Phase 1 | 基盤更新 | **完了** |
+| Phase 2 | 分析ロジック（data_transform / correlation / regression / model_selection / arima） | **完了** |
 | Phase 3 | Flet GUIアプリ構築（タブ①〜⑦） | **完了** |
 | Phase 4 | ドキュメント更新 | **完了** |
-| Phase 5-1 | DB拡張（ARIMA予測結果・モデル確定テーブル） | **未着手** |
+| **Phase 6A** | **バグ修正・緊急改善** | **未着手** |
+| **Phase 6B** | **UI統一（説明変数選択欄の全ページ統一）** | **未着手** |
+| **Phase 6C** | **変数別変換・ラグ設定の統合（設計変更）** | **未着手** |
+| **Phase 6D** | **データ閲覧拡張（比較プロット・インポート改善）** | **未着手** |
+| **Phase 6E** | **ARIMA改善** | **未着手** |
+| **Phase 6F** | **解釈説明・マニュアル充実** | **未着手** |
+| Phase 5-1 | DB拡張（ECL計算用テーブル） | **未着手** |
 | Phase 5-2 | src/analysis/ecl.py（ECL計算コアロジック） | **未着手** |
 | Phase 5-3 | src/db_operations.py 拡張 | **未着手** |
-| Phase 5-4 | ARIMAタブ拡張（予測結果の保存機能） | **未着手** |
+| Phase 5-4 | page_arima.py 拡張（予測結果の保存機能） | **未着手** |
 | Phase 5-5 | page_model_confirm.py（⑦モデル確定タブ） | **未着手** |
 | Phase 5-6 | page_ecl.py（⑧ECL計算タブ） | **未着手** |
 | Phase 5-7 | ドキュメント更新（Phase 5完了後） | **未着手** |
 
----
-
-## タブ設計の基本方針（案B: 段階的保存方式）
-
-ECL算出に至る「分析 → 確定 → 計算」の3段階を、それぞれ独立したタブで担当する。
-各段階の作業は更新頻度・担当者が異なるため、疎結合に設計する。
-
-```
-分析フェーズ（タブ①〜⑥）
-  │  CSVインポート → 相関・回帰・モデル選択 → ARIMA予測
-  │  ↓ 「このモデルで行く」と決定
-確定フェーズ（タブ⑦）
-  │  回帰モデルをDBに保存（model_configs / model_results）
-  │  ARIMA予測結果をDBに保存（arima_forecasts）
-  │  ↓ 保存済みデータが揃ったら
-計算フェーズ（タブ⑧）
-  └─ 保存済みモデル + 保存済みARIMA予測 → 3シナリオ → ECL
-```
-
-**各タブの更新頻度イメージ（年次運用）:**
-
-| タブ | 毎年更新 | 数年に1回 |
-|------|---------|---------|
-| ①〜⑤ 分析系 | 探索的に使用 | — |
-| ⑥ ARIMA | **毎年**: 最新データで予測し直す | — |
-| ⑦ モデル確定 | 必要時のみ再登録 | モデル改定時 |
-| ⑧ ECL計算 | **毎年**: ARIMA更新後に再計算 | — |
+**実装順序: Phase 6A → 6B → 6C → 6D → 6E → 6F → Phase 5**
 
 ---
 
-## 最終的なディレクトリ構成
+## レビューフィードバック整理（2026-03-10 テスト結果）
+
+### フィードバック原文のページ別分類
+
+| ページ | 番号 | 内容 | 分類 |
+|--------|------|------|------|
+| データ閲覧 | 1 | データ変換機能が欲しい | 新機能（6D） |
+| データ閲覧 | 2 | 説明変数と目的変数を同じ画面でプロット（新タブ） | 新機能（6D） |
+| データ閲覧 | 3 | 選択した変数を1グラフで重ねて表示する機能 | 新機能（6D） |
+| データ閲覧 | 4 | 目的変数インポートはレコード追加方式・初回一括インポートGUI | 設計確認→新機能（6D） |
+| データ閲覧 | 5 | 目的変数タブのデータセット名・タイプ・単位フィールドは機能しているか | バグ確認（6A） |
+| データ閲覧 | 6 | セグメント情報は絞り込みに使っているか | 仕様確認（6A） |
+| 相関分析 | 1 | 説明変数選択欄が旧式のまま | UI統一（6B） |
+| 相関分析 | 2 | データ変換が一括のみ（動的回帰と異なる）。仕様通り？ | 設計決定（6C） |
+| 相関分析 | 3 | 相関分析の追加プロット・指標はないか | 機能拡張（後回し） |
+| 回帰分析 | 1 | 説明変数選択欄が旧式のまま | UI統一（6B） |
+| 回帰分析 | 2 | データ変換が一括のみ。仕様通り？ | 設計決定（6C） |
+| 回帰分析 | 3 | 交差検証の分割数の説明が欲しい | ヘルプ充実（6F） |
+| 回帰分析 | 4 | ラグは一律のみ。変数ごとに異なるラグは想定されないか | 設計決定（6C） |
+| 回帰分析 | 5 | 交差検証結果・残差プロットの解釈説明を充実させてほしい | ヘルプ充実（6F） |
+| 回帰分析 | 6 | 残差ヒストグラムを「時系列残差プロット」と説明している | バグ（6A） |
+| 回帰分析 | 7 | MSE標準偏差・各foldのMSEが画面に見えない | バグ→表示追加（6A） |
+| モデル選択 | 1 | 説明変数選択欄が旧式のまま | UI統一（6B） |
+| モデル選択 | 2 | データ変換が一括のみ。仕様通り？ | 設計決定（6C） |
+| モデル選択 | 3 | 評価結果のfeaturesを日本語・改行表示にしてほしい | UI改善（6B） |
+| モデル選択 | 4 | 優位な値に色付けは可能か | UI改善（6B） |
+| モデル選択 | 5 | ラグは一律のみ。変数ごとのラグは想定されないか | 設計決定（6C） |
+| モデル選択 | 6 | VIF<=10フィルタのトグルが機能しない（全数/全数のまま） | バグ（6A） |
+| 動的回帰 | 1 | 各ページで変数別設定できればこのページは不要では？ | 設計見直し（6C） |
+| 動的回帰 | 2 | 説明変数は変換・標準化できるが目的変数はできない。混在した結果に意味は？ | 設計確認（6C） |
+| ARIMA | 1 | nlagsデフォルト20がデータ数40未満では使えない。自由入力フィールドが欲しい | バグ（6A） |
+| ARIMA | 2 | 将来シナリオで手動入力値を優先、なければARIMA予測値を採用する方式に | 新機能（6E） |
+| ARIMA | 3 | 実務担当者向けのARIMA解説・マニュアルを充実させてほしい | ドキュメント（6F） |
+
+---
+
+## Phase 6A: バグ修正・緊急改善
+
+**対象ファイル:** `pages/page_regression.py`, `pages/page_model_selection.py`, `pages/page_arima.py`, `pages/page_data_view.py`
+
+### 修正項目一覧
+
+| # | 対象ページ | 問題 | 修正内容 |
+|---|-----------|------|---------|
+| A-1 | 回帰分析 | 残差ヒストグラムのラベルが「時系列残差プロット」になっている | ラベルを「残差の分布（ヒストグラム）」に修正 |
+| A-2 | 回帰分析 | MSE標準偏差・各foldのMSEが表示されていない | 交差検証結果テーブルにfold別MSE・標準偏差を追加表示 |
+| A-3 | モデル選択 | VIF<=10フィルタのトグルが機能しない | filter_models()の呼び出しとUI更新のロジックを修正 |
+| A-4 | ARIMA | nlagsデフォルト値20がデータ数40未満で使えない | デフォルト値を削除（Noneで自動）＋自由入力フィールドを追加 |
+| A-5 | データ閲覧 | 目的変数タブのデータセット名・タイプ・単位フィールドの機能確認 | 実際にDBに保存/表示されているか検証し、未使用なら削除 or 説明追記 |
+| A-6 | データ閲覧 | セグメント情報の利用状況確認 | 絞り込みに使っているか確認し、使っていなければ将来対応として整理 |
+
+---
+
+## Phase 6B: UI統一（全ページ共通化）
+
+**目的:** ②相関分析・③回帰分析・④モデル選択の説明変数選択欄を、⑤動的回帰と同じ新式UI（DataSourceSelector）に統一する。
+
+### 修正対象
+
+| ページ | 現状 | 修正後 |
+|--------|------|--------|
+| `page_correlation.py` | 旧式チェックボックス | DataSourceSelector + VariableSelector |
+| `page_regression.py` | 旧式チェックボックス | DataSourceSelector + VariableSelector |
+| `page_model_selection.py` | 旧式チェックボックス | DataSourceSelector + VariableSelector |
+
+### モデル選択ページのUI改善
+
+| 改善項目 | 内容 |
+|---------|------|
+| features列の日本語表示 | code_to_nameマッピングを使い、変数名を日本語で表示。複数変数は改行で区切る |
+| 有意な値の色付け | p値<0.05の変数を緑、VIF>10の変数を赤でハイライト。Adj.R²・AIC等も相対比較で色付け |
+
+---
+
+## Phase 6C: 変数別変換・ラグ設定の統合方針（設計変更）
+
+### 基本方針（レビューを踏まえた設計変更）
+
+**動的回帰ページの役割を「変数別設定専用タブ」として明確化し、他ページへのトグル追加は行わない。**
+
+理由:
+- 変数別設定は組み合わせが爆発的に増加し、モデル選択（組み合わせ探索）との相性が悪い
+- 相関分析・モデル探索は「一括変換で全体傾向を把握」する用途なので一括変換が適切
+- 動的回帰ページで変数別設定を行った後、回帰分析ページで精査するワークフローが合理的
+
+### 各ページの変換方式（確定）
+
+| ページ | 変換方式 | 理由 |
+|--------|---------|------|
+| ②相関分析 | 一括（全変数同じ変換） | 全変数の相関関係を均等に比較するため |
+| ③回帰分析 | 一括 | まず全変数同じ条件で評価する段階 |
+| ④モデル選択 | 一括 | 全組み合わせ探索は一括変換が前提（変数別にすると組み合わせ数が爆発） |
+| ⑤動的回帰 | **変数別（現状維持）** | 変数ごとの細かな設定はここで行う |
+
+### 目的変数の変換・標準化方針
+
+**目的変数（PD/LGD）は変換・標準化しない。**
+
+理由:
+- PD/LGDは解釈可能な率（0〜1）であり、変換すると実務解釈が困難になる
+- 標準化した目的変数と非標準化の説明変数を混在させた場合、係数の解釈が困難
+- 必要であれば説明変数側の標準化で対応する
+
+→ 動的回帰ページに「目的変数は変換・標準化の対象外」という注意書きを追加する。
+
+### ラグ設定方針
+
+| ページ | ラグ設定 | 理由 |
+|--------|---------|------|
+| ②③④ | 一律（全変数に同じラグ） | 探索段階では一律が効率的 |
+| ⑤動的回帰 | **変数別（現状維持）** | 細かな調整はここで行う |
+
+モデル選択ページで「変数ごとにラグが異なるパターン」を探索したい場合は、動的回帰ページで個別設定した上でモデル確定タブに直接保存する運用で対応。
+
+---
+
+## Phase 6D: データ閲覧ページ拡張
+
+**対象ファイル:** `pages/page_data_view.py`
+
+### 新機能①: データ変換後プロット（既存タブに追加）
+
+既存の説明変数タブ・目的変数タブに「変換してプロット」機能を追加。
 
 ```
-calc_ecl/
-├── main.py                        ← Fletアプリ エントリポイント
-├── requirements.txt
-├── CLAUDE.md
-├── config/
-│   ├── db.py                      ← DB接続（psycopg2 + configparser）
-│   ├── db.ini.example
-│   └── db.ini                     ← .gitignore対象
-├── src/
-│   ├── import_indicators.py       ← 説明変数CSVインポートスクリプト
-│   ├── import_targets.py          ← 目的変数CSVインポートスクリプト
-│   ├── db_operations.py           ← model_configs等へのDB保存（Phase 5-3で拡張）
-│   ├── data/
-│   │   └── indicator_loader.py    ← DB→DataFrame変換
-│   └── analysis/                   ← 統計分析コアロジック（UI非依存）
-│       ├── __init__.py
-│       ├── data_transform.py      ← データ変換（対数・差分・標準化等）
-│       ├── correlation.py         ← 相関分析・VIF
-│       ├── regression.py          ← OLS回帰・評価指標
-│       ├── model_selection.py     ← 説明変数の組み合わせ探索
-│       ├── arima.py               ← ARIMA時系列モデル
-│       └── ecl.py                 ← ECL計算コアロジック（Phase 5-2で新規追加）
-├── pages/                          ← Flet UIページ
-│   ├── page_data_view.py          ← ① データ閲覧・確認
-│   ├── page_correlation.py        ← ② 相関分析・VIF表示
-│   ├── page_regression.py         ← ③ 回帰分析
-│   ├── page_model_selection.py    ← ④ モデル選択
-│   ├── page_dynamic_regression.py ← ⑤ 動的回帰
-│   ├── page_arima.py              ← ⑥ ARIMA分析（Phase 5-4で予測保存機能を追加）
-│   ├── page_model_confirm.py      ← ⑦ モデル確定（Phase 5-5で新規追加）
-│   └── page_ecl.py                ← ⑧ ECL計算（Phase 5-6で新規追加、page_forecast.pyを置換）
-├── components/                     ← 再利用UIパーツ
-│   ├── variable_selector.py       ← 変数選択チェックボックス
-│   ├── plot_utils.py              ← matplotlib→base64変換
-│   ├── data_source_selector.py    ← データソース選択UI
-│   └── help_panel.py              ← 折りたたみ式ヘルプパネル
-├── db/
-│   ├── migrations/
-│   │   ├── 001_create_tables.sql              ← 説明変数・モデル系テーブル
-│   │   ├── 002_create_target_tables.sql       ← 目的変数テーブル
-│   │   ├── 003_add_fiscal_year_month.sql      ← 決算年月カラム追加
-│   │   └── 004_create_ecl_tables.sql          ← ECL計算用テーブル（Phase 5-1で追加）
-│   └── seeds/
-├── docs/
-│   ├── implementation_plan.md     ← 本ファイル
-│   ├── system_manual.md
-│   ├── operation_manual.md
-│   ├── interpretation_manual.md   ← 統計結果解釈ガイド
-│   ├── db_design.md
-│   └── NotebookLM/
-└── indicator/                      ← 統計ダッシュボードCSV
+変換方法: [none / log / diff / log_diff / arcsinh / arcsinh_diff ▼]
+[変換してプロット]
+```
+
+### 新機能②: 比較プロット（新タブ「③ 比較プロット」）
+
+説明変数・目的変数を横断的に選択し、1つのグラフで重ねて表示する。
+
+**UI構成:**
+```
+────────────────────────────────────────
+ データソース選択（DataSourceSelector）
+────────────────────────────────────────
+ 変数選択（説明変数・目的変数を横断選択可）
+  □ unemployment_rate（完全失業率）
+  □ gdp_growth（実質GDP成長率）
+  □ pd_corporate（コーポレートPD）
+  ※ 最大8変数まで同時選択可
+────────────────────────────────────────
+ 表示オプション
+  ○ 2軸表示（左軸: 説明変数、右軸: 目的変数）
+  ○ 正規化表示（各系列を0-1スケールに正規化して比較）
+────────────────────────────────────────
+ [プロット表示]
+────────────────────────────────────────
+```
+
+### 新機能③: 目的変数の一括インポートGUI
+
+現在は目的変数のインポートがレコード追加方式のみ。初回は複数年分を一括インポートできる機能を追加。
+
+**運用フロー:**
+- 初回: 「一括インポート」ボタン → CSVの全レコードを一括登録
+- 毎年: 「レコード追加」ボタン → 最新年のデータのみ追加（既存データを上書きしない）
+
+**UI追加箇所:** 目的変数タブのインポートセクションに「インポートモード」を選択するラジオボタンを追加。
+
+---
+
+## Phase 6E: ARIMA改善
+
+**対象ファイル:** `pages/page_arima.py`, `pages/page_forecast.py`
+
+### E-1: ADF検定のnlags改善
+
+| 変更前 | 変更後 |
+|--------|--------|
+| デフォルト値=20（データ数40未満で使用不可） | デフォルト値なし（statsmodelsが自動選択）＋任意入力フィールドを追加 |
+
+```python
+# 変更前
+result = adfuller(series, maxlag=20)
+
+# 変更後（nlags入力フィールドが空の場合はNone=自動）
+nlags = int(nlags_field.value) if nlags_field.value else None
+result = adfuller(series, maxlag=nlags)
+```
+
+**UIに追加:**
+```
+ADF検定 nlagsオプション: [    ] （空欄で自動選択）
+ℹ️ データ数の1/3以下を目安に設定。空欄の場合はstatsmodelsが自動決定します。
+```
+
+### E-2: 将来シナリオでの手動入力値優先
+
+`pages/page_forecast.py` を改修し、説明変数の将来値について:
+- 入力フィールドに値が入力されている場合: その値を使用
+- 入力フィールドが空欄の場合: ARIMA予測値を自動入力（フォールバック）
+
+```
+説明変数の将来値入力（手動入力が優先）
+変数名          | 2026年度 | 2027年度 | 2028年度 | ARIMAから自動入力
+unemployment    | [    ]   | [    ]   | [    ]   | [ARIMAを適用]
+gdp_growth      | [1.2 ]   | [1.5 ]   | [1.3 ]   | ←手動入力済み
 ```
 
 ---
 
-## Phase 1〜4: 完了済み（詳細省略）
+## Phase 6F: 解釈説明・マニュアル充実
 
-Phase 1〜4はすべて完了。以下の成果物が存在する。
+### F-1: 各ページのインライン説明強化
 
-- `src/analysis/` 以下: data_transform, correlation, regression, model_selection, arima
-- `pages/` 以下: page_data_view, page_correlation, page_regression, page_model_selection,
-  page_dynamic_regression, page_arima, page_forecast（プレースホルダ）
-- `docs/`: system_manual, operation_manual, interpretation_manual, db_design
+ヘルプパネル（`components/help_panel.py`）の内容を充実させる。
+
+| ページ | 追加すべき説明 |
+|--------|-------------|
+| ③回帰分析 | 交差検証の分割数の意味（5-Fold = 全データを5分割し、4/5で学習・1/5で検証を5回繰り返す）|
+| ③回帰分析 | 残差プロットの見方・判断基準（ランダムに散らばっているか、パターンがないか）|
+| ③回帰分析 | 残差ヒストグラムの見方（正規分布に近いか）|
+| ③回帰分析 | 交差検証の各fold MSE・標準偏差の解釈 |
+| ⑤動的回帰 | 目的変数の変換・標準化を行わない理由の説明 |
+| ⑥ARIMA | ARIMAモデルの基本概念（p, d, q の意味）|
+| ⑥ARIMA | ADF検定の解釈方法（p値<0.05で定常性あり）|
+| ⑥ARIMA | ACF/PACFグラフの読み方 |
+| ⑥ARIMA | nlagsの設定目安 |
+
+### F-2: 実務担当者向けARIMAマニュアル追加
+
+`docs/operation_manual.md` に「ARIMAページの操作手順」セクションを追加。
+
+```
+セクション構成:
+  1. ARIMAとは何か（一言説明）
+  2. このページで何をするか（年次運用での役割）
+  3. ADF検定の手順と結果の読み方
+  4. ACF/PACFグラフの見方と次数(p,d,q)の選び方
+  5. ARIMA推定の実行と結果の確認
+  6. 予測の実行と予測区間の解釈
+  7. よくあるトラブルと対処方法
+```
+
+### F-3: `docs/interpretation_manual.md` 拡張
+
+既存の統計結果解釈マニュアルに以下を追加:
+- 交差検証の詳細解釈（fold別MSE、標準偏差の判断基準）
+- ARIMAモデルの診断（残差の正規性・独立性の確認方法）
+- 動的回帰での目的変数の変換を行わない理由
 
 ---
 
-## Phase 5: ECL算出機能の実装
+## Phase 5: ECL算出機能（既存計画を維持）
 
-### 全体構成
-
-```
-Phase 5-1: DB拡張
-  └─ 004_create_ecl_tables.sql
-       ├─ arima_forecasts          ← ARIMA予測結果の保存先
-       └─ ecl_results              ← ECL計算結果の保存先
-       ※ model_configs / model_results は既存テーブルをそのまま利用
-
-Phase 5-2: src/analysis/ecl.py（新規）
-  └─ ECL計算の純粋な数値ロジック（UI非依存）
-
-Phase 5-3: src/db_operations.py 拡張
-  └─ モデル・ARIMA予測・ECL結果のDB保存/読込関数を追加
-
-Phase 5-4: page_arima.py 拡張
-  └─ 「ARIMA予測結果を保存」ボタンを追加
-
-Phase 5-5: page_model_confirm.py（新規）
-  └─ ⑦ モデル確定タブ
-
-Phase 5-6: page_ecl.py（新規）
-  └─ ⑧ ECL計算タブ（page_forecast.py を置換）
-
-Phase 5-7: ドキュメント更新
-```
-
----
+Phase 6完了後に着手する。設計は既存計画書の内容を維持。
 
 ### 5-1. DB拡張 — `db/migrations/004_create_ecl_tables.sql`
 
-#### 新規テーブル: `arima_forecasts`
+新規テーブル:
+- `arima_forecasts`: ARIMA予測結果の保存先
+- `ecl_results`: ECL計算結果の保存先
 
-ARIMAで予測した説明変数・目的変数の将来値を保存する。
-1回の「予測セッション」が1レコードに対応する。
+既存テーブル（そのまま利用）:
+- `model_configs` / `model_results`
+
+### 5-2〜5-6: コアロジック・UI実装
+
+| Phase | ファイル | 内容 |
+|-------|---------|------|
+| 5-2 | `src/analysis/ecl.py` | ECL計算コアロジック（UI非依存） |
+| 5-3 | `src/db_operations.py` | モデル・ARIMA・ECL結果のDB保存/読込 |
+| 5-4 | `pages/page_arima.py` | 「予測結果をDBに保存」ボタンを追加 |
+| 5-5 | `pages/page_model_confirm.py` | ⑦モデル確定タブ（新規） |
+| 5-6 | `pages/page_ecl.py` | ⑧ECL計算タブ（page_forecast.py置換） |
+| 5-7 | `docs/` | ドキュメント更新 |
+
+Phase 5の詳細設計（DB構造・関数仕様・UI設計）は本ファイルの末尾に記載。
+
+---
+
+## タブ構成（Phase 5完了後: 8タブ）
+
+| # | タブ名 | ファイル | 主な機能 | 状態 |
+|---|--------|---------|---------|------|
+| ① | データ閲覧 | `page_data_view.py` | データセット確認・CSVインポート・**比較プロット（6D）** | 6D対応予定 |
+| ② | 相関分析 | `page_correlation.py` | 相関行列・VIF・**新式UI（6B）** | 6B対応予定 |
+| ③ | 回帰分析 | `page_regression.py` | OLS回帰・残差プロット・交差検証・**新式UI（6B）** | 6B対応予定 |
+| ④ | モデル選択 | `page_model_selection.py` | 全組み合わせ探索・**新式UI・表示改善（6B）** | 6B対応予定 |
+| ⑤ | 動的回帰 | `page_dynamic_regression.py` | 変数別ラグ・変換設定（現状維持・注記追加） | 6C対応予定 |
+| ⑥ | ARIMA | `page_arima.py` | ADF検定・ACF/PACF・次数選択・**nlags改善（6E）**・**予測保存（5-4）** | 6E/5-4対応予定 |
+| ⑦ | モデル確定 | `page_model_confirm.py` | 回帰モデルのDB登録・一覧管理 | 未着手（5-5） |
+| ⑧ | ECL計算 | `page_ecl.py` | シナリオ設定・ECL計算・結果保存 | 未着手（5-6） |
+
+---
+
+## 実装順序サマリー
+
+```
+Phase 6A（バグ修正）              ← 最優先。すぐに着手
+  ↓
+Phase 6B（UI統一）                ← 6A完了後
+  ↓
+Phase 6C（設計変更・注記追加）    ← コード変更が少ない。6Bと並行可
+  ↓
+Phase 6D（データ閲覧拡張）        ← 6B完了後
+  ↓
+Phase 6E（ARIMA改善）             ← 6A完了後（6Dと並行可）
+  ↓
+Phase 6F（ドキュメント充実）      ← 随時。6E完了後にまとめて実施
+  ↓
+Phase 5（ECL算出機能）            ← Phase 6完了後
+```
+
+---
+
+## Phase 5 詳細設計（参考：変更なし）
+
+### 5-1. DB拡張 — `db/migrations/004_create_ecl_tables.sql`
 
 ```sql
 CREATE TABLE arima_forecasts (
     forecast_id         SERIAL PRIMARY KEY,
-    indicator_code      VARCHAR(100) NOT NULL,   -- 予測対象の指標コード（例: unemployment_rate）
+    indicator_code      VARCHAR(100) NOT NULL,
     dataset_id          INTEGER REFERENCES indicator_datasets(dataset_id),
-    frequency           VARCHAR(20) NOT NULL,    -- monthly / quarterly / fiscal_year 等
-    arima_order         VARCHAR(20) NOT NULL,    -- "(p,d,q)" 形式の文字列
-    forecast_steps      INTEGER NOT NULL,        -- 予測期間数
-    forecast_data       JSONB NOT NULL,          -- {日付: {forecast, lower, upper}, ...}
-    scenario_label      VARCHAR(50),             -- "base" / "upside" / "downside"（任意）
+    frequency           VARCHAR(20) NOT NULL,
+    arima_order         VARCHAR(20) NOT NULL,
+    forecast_steps      INTEGER NOT NULL,
+    forecast_data       JSONB NOT NULL,
+    scenario_label      VARCHAR(50),
     note                TEXT,
     created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-```
 
-**forecast_dataのJSONB構造:**
-
-```json
-{
-  "2026-04-01": {"forecast": 3.1, "lower": 2.5, "upper": 3.7},
-  "2027-04-01": {"forecast": 3.3, "lower": 2.4, "upper": 4.2},
-  "2028-04-01": {"forecast": 3.5, "lower": 2.2, "upper": 4.8}
-}
-```
-
-#### 新規テーブル: `ecl_results`
-
-ECL計算の最終結果を保存する。
-
-```sql
 CREATE TABLE ecl_results (
     ecl_id              SERIAL PRIMARY KEY,
     model_config_id     INTEGER REFERENCES model_configs(config_id),
     target_dataset_id   INTEGER REFERENCES target_datasets(target_dataset_id),
     segment_code        VARCHAR(50) NOT NULL DEFAULT 'all',
-    target_code         VARCHAR(100) NOT NULL,   -- pd_corporate 等
-    fiscal_year_month   DATE,                    -- 対象決算期
-    weight_base         NUMERIC(5,4) NOT NULL,   -- ベースシナリオウェイト（例: 0.60）
-    weight_upside       NUMERIC(5,4) NOT NULL,   -- 楽観シナリオウェイト
-    weight_downside     NUMERIC(5,4) NOT NULL,   -- 悲観シナリオウェイト
-    results             JSONB NOT NULL,           -- シナリオ別・期間別の計算結果
+    target_code         VARCHAR(100) NOT NULL,
+    fiscal_year_month   DATE,
+    weight_base         NUMERIC(5,4) NOT NULL,
+    weight_upside       NUMERIC(5,4) NOT NULL,
+    weight_downside     NUMERIC(5,4) NOT NULL,
+    results             JSONB NOT NULL,
     note                TEXT,
     created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
-**resultsのJSONB構造:**
-
-```json
-{
-  "periods": ["2026-04-01", "2027-04-01", "2028-04-01"],
-  "base":     {"pd": [0.023, 0.025, 0.026], "lgd": [0.45, 0.46, 0.46]},
-  "upside":   {"pd": [0.019, 0.020, 0.021], "lgd": [0.43, 0.43, 0.44]},
-  "downside": {"pd": [0.031, 0.035, 0.038], "lgd": [0.48, 0.50, 0.51]},
-  "weighted_pd":  [0.024, 0.026, 0.027],
-  "weighted_lgd": [0.45, 0.46, 0.46]
-}
-```
-
-#### 既存テーブルの利用
-
-| テーブル | Phase 5での利用方法 |
-|---------|-----------------|
-| `model_configs` | ⑦モデル確定タブからINSERT。使用変数・変換設定を記録 |
-| `model_results` | モデル評価指標（R²・AIC等）を保存 |
-| `forecast_scenarios` | （利用しない。ecl_resultsで代替） |
-
----
-
-### 5-2. `src/analysis/ecl.py` — ECL計算コアロジック（新規）
-
-UIに依存しない純粋なECL計算関数群。
+### 5-2. `src/analysis/ecl.py` — 関数シグネチャ
 
 ```python
-def apply_model_to_forecast(
-    model_result: dict,
-    forecast_df: pd.DataFrame,
-) -> pd.DataFrame:
-    """
-    確定済み回帰モデルにARIMA予測値を代入し、PD/LGD予測値を計算する。
-
-    Parameters
-    ----------
-    model_result : dict
-        fit_ols() / fit_arima() の戻り値。
-        model_result["model"] = statsmodels OLS結果オブジェクト
-    forecast_df : pd.DataFrame
-        説明変数の予測値DataFrame。カラム = 説明変数名、インデックス = 将来日付
-        ※ 各シナリオ（base/lower/upper）ごとに呼び出す
-
-    Returns
-    -------
-    pd.DataFrame
-        カラム: predicted（予測値）
-        インデックス: 将来日付
-    """
+def apply_model_to_forecast(model_result: dict, forecast_df: pd.DataFrame) -> pd.DataFrame:
+    """確定済み回帰モデルにARIMA予測値を代入し、PD/LGD予測値を計算する"""
 
 def calc_weighted_ecl(
-    base_pd: pd.Series,
-    upside_pd: pd.Series,
-    downside_pd: pd.Series,
-    base_lgd: pd.Series,
-    upside_lgd: pd.Series,
-    downside_lgd: pd.Series,
-    weight_base: float,
-    weight_upside: float,
-    weight_downside: float,
+    base_pd, upside_pd, downside_pd,
+    base_lgd, upside_lgd, downside_lgd,
+    weight_base, weight_upside, weight_downside
 ) -> dict:
-    """
-    3シナリオの加重平均でECL期待値を計算する。
+    """3シナリオの加重平均でECL期待値を計算する"""
 
-    Returns
-    -------
-    dict
-        キー:
-        - weighted_pd: 加重平均PD（Series）
-        - weighted_lgd: 加重平均LGD（Series）
-        - weighted_ecl_rate: 加重平均ECL率 = weighted_pd × weighted_lgd（Series）
-          ※ EADは外部から受け取り、最終的な金額換算は呼び出し元で行う
-    """
-
-def build_scenario_forecast(
-    arima_forecasts: dict[str, pd.DataFrame],
-    scenario: str,
-) -> pd.DataFrame:
-    """
-    説明変数ごとのARIMA予測結果から、指定シナリオの説明変数DataFrameを組み立てる。
-
-    Parameters
-    ----------
-    arima_forecasts : dict
-        {指標コード: forecast()の戻り値DataFrame(forecast/lower/upper列)}
-    scenario : str
-        "base" → forecast列, "upside" → lower列, "downside" → upper列
-
-    Returns
-    -------
-    pd.DataFrame
-        カラム = 指標コード、インデックス = 将来日付
-    """
+def build_scenario_forecast(arima_forecasts: dict, scenario: str) -> pd.DataFrame:
+    """説明変数ごとのARIMA予測結果から、指定シナリオの説明変数DataFrameを組み立てる"""
 ```
 
----
-
-### 5-3. `src/db_operations.py` 拡張
-
-既存ファイルに以下の関数を追加する。
+### 5-3. `src/db_operations.py` 拡張関数一覧
 
 ```python
-# --- モデル確定 ---
+# モデル確定
+save_model_config(config_dict) -> int
+save_model_result(config_id, result_dict) -> int
+load_model_configs() -> pd.DataFrame
+load_model_result(config_id) -> dict
 
-def save_model_config(config_dict: dict) -> int:
-    """
-    model_configsにモデル設定を保存し、config_idを返す。
+# ARIMA予測
+save_arima_forecast(forecast_dict) -> int
+load_arima_forecasts(indicator_code=None) -> pd.DataFrame
+load_arima_forecast_data(forecast_id) -> pd.DataFrame
 
-    config_dict のキー:
-      dataset_id, target_dataset_id, target_code, segment_code,
-      frequency, feature_cols (list), transform_settings (dict),
-      lag_settings (dict), note
-    """
-
-def save_model_result(config_id: int, result_dict: dict) -> int:
-    """
-    model_resultsにOLS評価指標を保存する。
-
-    result_dict のキー:
-      r2, adj_r2, aic, bic, dw, f_stat, f_pvalue,
-      coefficients (dict: {variable: {coef, std_err, t_stat, p_value}}),
-      nobs
-    """
-
-def load_model_configs() -> pd.DataFrame:
-    """保存済みモデル設定の一覧をDataFrameで返す"""
-
-def load_model_result(config_id: int) -> dict:
-    """指定config_idのモデル結果を返す"""
-
-# --- ARIMA予測結果 ---
-
-def save_arima_forecast(forecast_dict: dict) -> int:
-    """
-    arima_forecastsにARIMA予測結果を保存し、forecast_idを返す。
-
-    forecast_dict のキー:
-      indicator_code, dataset_id, frequency, arima_order,
-      forecast_steps, forecast_data (dict), scenario_label, note
-    """
-
-def load_arima_forecasts(indicator_code: str = None) -> pd.DataFrame:
-    """保存済みARIMA予測一覧を返す。indicator_codeで絞り込み可"""
-
-def load_arima_forecast_data(forecast_id: int) -> pd.DataFrame:
-    """指定forecast_idの予測値をDataFrame（forecast/lower/upper列）で返す"""
-
-# --- ECL計算結果 ---
-
-def save_ecl_result(ecl_dict: dict) -> int:
-    """ecl_resultsにECL計算結果を保存し、ecl_idを返す"""
-
-def load_ecl_results() -> pd.DataFrame:
-    """保存済みECL計算結果の一覧を返す"""
+# ECL結果
+save_ecl_result(ecl_dict) -> int
+load_ecl_results() -> pd.DataFrame
 ```
 
----
-
-### 5-4. `pages/page_arima.py` 拡張
-
-既存のARIMAタブに「予測結果を保存」セクションを追加する。
-
-**追加するUI要素:**
-
-```
-────────────────────────────────────────
- 予測結果の保存
-────────────────────────────────────────
- 指標コード    : [unemployment_rate    ]  ← 自動入力（選択中の変数から）
- シナリオラベル: [base / 任意入力      ]  ← オプション
- メモ          : [                     ]
- [予測結果をDBに保存]
-────────────────────────────────────────
-```
-
-**保存の流れ:**
-1. ARIMA予測（`forecast()`）を実行済みであることを確認
-2. `save_arima_forecast()` を呼び出し、`arima_forecasts` テーブルに保存
-3. 保存完了メッセージを表示し、`forecast_id` を表示する
-
-**設計上の注意:**
-- 1回の予測実行 = 1レコード（forecast/lower/upperをまとめて1件として保存）
-- シナリオラベルは任意。付けない場合は後でECL計算タブで振り分ける
-
----
-
-### 5-5. `pages/page_model_confirm.py` — ⑦ モデル確定タブ（新規）
-
-確定した回帰モデル（③回帰分析または⑤動的回帰で精査したもの）をDBに登録する専用タブ。
-
-**UI構成:**
+### 5-5. ⑦モデル確定タブ UI構成
 
 ```
 ────────────────────────────────────────
  データソース選択（DataSourceSelectorを再利用）
 ────────────────────────────────────────
- 目的変数・説明変数の選択（VariableSelectorを再利用）
+ 目的変数・説明変数の選択
 ────────────────────────────────────────
- モデル設定
-  ラグ設定    : [変数ごとに入力]
-  変換設定    : [変数ごとに選択]
-  メモ        : [               ]
+ モデル設定（ラグ・変換・メモ）
 ────────────────────────────────────────
  [回帰を実行して確認]
 ────────────────────────────────────────
- 回帰結果プレビュー（fit_ols()の結果を表示）
-  Adj.R²: 0.73 | AIC: -45.3 | DW: 1.87
-  係数テーブル（variable / coef / p_value）
+ 回帰結果プレビュー（Adj.R² / AIC / DW / 係数テーブル）
 ────────────────────────────────────────
  [このモデルをDBに保存]
 ────────────────────────────────────────
@@ -433,83 +434,25 @@ def load_ecl_results() -> pd.DataFrame:
 ────────────────────────────────────────
 ```
 
-**保存の流れ:**
-1. DataSourceSelector・VariableSelectorで変数・設定を選択
-2. 「回帰を実行して確認」→ `fit_ols()` でプレビュー表示
-3. 「このモデルをDBに保存」→ `save_model_config()` + `save_model_result()` を実行
-4. 保存済みモデル一覧を更新表示
-
----
-
-### 5-6. `pages/page_ecl.py` — ⑧ ECL計算タブ（新規）
-
-保存済みの回帰モデルとARIMA予測を組み合わせ、3シナリオでECLを計算する。
-現在の `page_forecast.py` を置換する（ファイル名を変更して内容を全面書き直す）。
-
-**UI構成:**
+### 5-6. ⑧ECL計算タブ UI構成
 
 ```
 ────────────────────────────────────────
- Step 1: 回帰モデルの選択
-  [保存済みモデル一覧ドロップダウン]
-  → 選択すると: 目的変数・説明変数・Adj.R²・AIC等を表示
+ Step 1: 回帰モデルの選択（保存済みモデル一覧ドロップダウン）
 ────────────────────────────────────────
  Step 2: 説明変数ごとのARIMA予測の割り当て
-  変数名        | ARIMA予測（保存済み）    | シナリオ対応
-  unemployment  | [予測ID=3を選択▼]        | forecast=base, lower=楽観, upper=悲観
-  gdp_growth    | [予測ID=7を選択▼]        | forecast=base, lower=楽観, upper=悲観
+  変数名 | ARIMA予測（保存済みforecast_id） | シナリオ対応
 ────────────────────────────────────────
- Step 3: シナリオウェイトの設定
-  ベース   : [60]%
-  楽観     : [20]%
-  悲観     : [20]%  ← 合計100%でない場合は警告
+ Step 3: シナリオウェイト（ベース/楽観/悲観、合計100%チェック）
 ────────────────────────────────────────
- Step 4: 予測期間の設定
-  決算年月 : [2026年3月期]
-  EAD（残高）: [任意入力。空欄の場合はECL率のみ計算]
+ Step 4: 予測期間・EAD設定
 ────────────────────────────────────────
  [ECLを計算する]
 ────────────────────────────────────────
- 計算結果
-  ┌ グラフ: シナリオ別PD予測の時系列
-  │  ベース(青)・楽観(緑)・悲観(赤)・加重平均(黒破線)
-  ├ グラフ: シナリオ別LGD予測の時系列（LGDモデルが保存済みの場合）
-  └ 結果テーブル:
-      期間    | PD_base | PD_up | PD_down | PD_weighted | LGD_weighted | ECL率
-      2026FY  | 2.3%    | 1.9%  | 3.1%   | 2.4%        | 45.0%        | 1.08%
-
- [結果をDBに保存]  [CSVエクスポート]
+ 計算結果（シナリオ別グラフ・結果テーブル）
+ [結果をDBに保存] [CSVエクスポート]
 ────────────────────────────────────────
 ```
-
-**計算の流れ:**
-
-```
-1. 選択されたモデル（config_id）から fit_ols() のパラメータを復元
-2. 各説明変数のARIMA予測データ（forecast_id）を読み込む
-3. build_scenario_forecast() で3シナリオの説明変数DataFrameを作成
-4. apply_model_to_forecast() でシナリオ別のPD/LGD予測値を計算
-5. calc_weighted_ecl() で加重平均を計算
-6. グラフ・テーブルに結果を表示
-7. 「保存」ボタンで save_ecl_result() を呼び出す
-```
-
----
-
-## タブ構成（Phase 5完了後: 8タブ）
-
-| # | タブ名 | ファイル | 主な機能 | 状態 |
-|---|--------|---------|---------|------|
-| ① | データ閲覧 | `page_data_view.py` | データセット確認・CSVインポート | 完了 |
-| ② | 相関分析 | `page_correlation.py` | 相関行列・VIF | 完了 |
-| ③ | 回帰分析 | `page_regression.py` | OLS回帰・残差プロット・交差検証 | 完了 |
-| ④ | モデル選択 | `page_model_selection.py` | 全組み合わせ探索 | 完了 |
-| ⑤ | 動的回帰 | `page_dynamic_regression.py` | 変数別ラグ・変換設定 | 完了 |
-| ⑥ | ARIMA | `page_arima.py` | ADF検定・ACF/PACF・次数選択・**予測保存** | 拡張予定 |
-| ⑦ | モデル確定 | `page_model_confirm.py` | 回帰モデルのDB登録・一覧管理 | 未着手 |
-| ⑧ | ECL計算 | `page_ecl.py` | シナリオ設定・ECL計算・結果保存 | 未着手 |
-
-※ `page_forecast.py`（旧⑦プレースホルダ）は `page_ecl.py` に置換する。
 
 ---
 
@@ -520,123 +463,31 @@ def load_ecl_results() -> pd.DataFrame:
 
 【データ更新】
   ① データ閲覧タブ
-      - 最新の説明変数CSVをインポート（決算年月を指定して上書き）
-      - PD/LGD実績値のCSVをインポート
+      - 最新の説明変数CSVをインポート
+      - PD/LGD実績値のCSVをレコード追加インポート（6D後）
 
 【モデル探索（必要な年のみ）】
   ② 相関分析 → ④ モデル選択 → ③ 回帰分析 → ⑤ 動的回帰
-      - 変数の入替・改善が必要な場合に実施
-      - 毎年やる必要はない（モデルが安定している場合は⑦の保存済みを流用）
 
 【ARIMA予測（毎年実施）】
   ⑥ ARIMAタブ
       - 各説明変数について最新データでARIMAを再推定
-      - 予測結果（n年分）をDBに保存（「予測結果をDBに保存」ボタン）
+      - 予測結果をDBに保存
 
 【モデル確定（必要な年のみ）】
   ⑦ モデル確定タブ
-      - 変数・設定を選択して回帰を実行し確認
-      - 「このモデルをDBに保存」でconfig_idを取得
-      - モデルが変わらない年はスキップし、前年のconfig_idを流用
+      - 前年のconfig_idを流用するか、新規登録するか選択
 
 【ECL計算（毎年実施）】
   ⑧ ECL計算タブ
-      - config_id（確定済み回帰モデル）を選択
-      - 各変数にforecast_id（ARIMA予測結果）を割り当て
-      - シナリオウェイト・EADを設定
-      - 「ECLを計算する」→「結果をDBに保存」
+      - config_id + forecast_id を選択
+      - シナリオウェイト・EADを設定して計算・保存
 ```
-
----
-
-## Phase 5 実装順序
-
-| 順番 | Phase | 内容 | 依存 |
-|------|-------|------|------|
-| 1 | 5-1 | DB拡張（004_create_ecl_tables.sql） | なし |
-| 2 | 5-2 | src/analysis/ecl.py | なし（並行可） |
-| 3 | 5-3 | src/db_operations.py 拡張 | 5-1 |
-| 4 | 5-4 | page_arima.py 拡張（予測保存） | 5-3 |
-| 5 | 5-5 | page_model_confirm.py 新規 | 5-3 |
-| 6 | 5-6 | page_ecl.py 新規 | 5-2, 5-3, 5-4, 5-5 |
-| 7 | 5-7 | ドキュメント更新 | 5-1〜5-6 |
-
----
-
-## Phase 2〜4: 詳細仕様（参考）
-
-### 2-2. `src/analysis/data_transform.py` — データ変換
-
-| method | 処理 | 用途 |
-|--------|------|------|
-| none | そのまま | 原系列 |
-| log | log(1+x) | 右裾の重い分布を正規化 |
-| diff | 1次差分 | トレンド除去 |
-| log_diff | log→差分 | 変化率に近似 |
-| arcsinh | 逆双曲線正弦 | 負値を含むデータの変換 |
-| arcsinh_diff | arcsinh→差分 | 上記+トレンド除去 |
-
-### 3-2a. 説明変数決定ワークフロー（タブ①〜⑤の推奨利用順序）
-
-```
-タブ①: データ閲覧
-  └─ データセット選択、時系列グラフで傾向確認
-      ↓
-タブ②: 相関分析
-  └─ 相関行列で変数間の関係を把握
-  └─ VIFクロス表で多重共線性を初期スクリーニング
-      ↓
-タブ④: モデル選択（中心的ツール）
-  └─ N個の説明変数の全組み合わせを網羅的に探索
-  └─ AIC/BIC/Adj.R²/maxVIF/DWで各モデルを評価
-      ↓
-タブ③: 回帰分析（選出モデルの精査）
-  └─ 最良候補でOLS回帰を実行
-  └─ 各変数のp値・t値・係数を確認
-  └─ 残差プロット・DW検定で残差の性質を確認
-      ↓
-タブ⑤: 動的回帰（必要に応じて）
-  └─ 変数ごとに個別のラグを設定して時系列回帰
-      ↓
-タブ⑦: モデル確定
-  └─ 確定したモデルをDBに保存
-```
-
-**変数選定の判断基準まとめ:**
-
-| 基準 | 閾値 | アクション |
-|------|------|-----------|
-| VIF | > 10 | 多重共線性あり。片方を除外 |
-| 相関係数 | > 0.9 | 強い相関。片方を除外 |
-| p値 | > 0.05 | 統計的に有意でない。除外を検討 |
-| AIC/BIC | 小さいほど良い | モデル比較の主要指標 |
-| Adj. R² | < 0.5 | 説明力不足。変数追加を検討 |
-| DW | < 1.5 or > 2.5 | 残差に自己相関。ラグ変数を検討 |
-
----
-
-## Craft_RegressionAnalysis 移植対象まとめ
-
-| 移植先（calc_ecl） | 移植元（Craft_RegressionAnalysis） | 抽出対象 |
-|--------------------|------------------------------------|---------|
-| `src/analysis/data_transform.py` | `utils/data_transformation.py` | `get_dataframe_for_pattern()`, 変換ロジック全体 |
-| `src/analysis/correlation.py` | `pages/page_model_selection.py` | `calculate_vif()` 関数 |
-| `src/analysis/correlation.py` | `pages/page_analysis.py` | 相関ヒートマップ・VIFクロス表ロジック |
-| `src/analysis/regression.py` | `pages/page_model_selection.py` | `calculate_model_metrics()` 関数 |
-| `src/analysis/regression.py` | `pages/page_regression.py` | `regression_calc()` 関数（交差検証、残差プロット） |
-| `src/analysis/regression.py` | `pages/page_dynamic_regression.py` | 変数別ラグ設定ロジック |
-| `src/analysis/model_selection.py` | `pages/page_model_selection.py` | `run_analysis()` 内の組み合わせ探索ロジック |
-| `components/variable_selector.py` | `components/variable_selector.py` | VariableSelectorクラス（変数別変換・標準化設定） |
-| `components/plot_utils.py` | 各pageのmatplotlib描画コード | base64変換パターン |
-| `pages/page_dynamic_regression.py` | `pages/page_dynamic_regression.py` | 変数ごと個別ラグの動的回帰UIロジック |
-| `src/analysis/arima.py` | ※Craft版はダミーのため新規実装 | — |
-| `src/analysis/ecl.py` | ※新規実装（ECL算出ロジック） | — |
 
 ---
 
 ## 検証方法
 
-1. **Phase 2**: 各分析モジュールの `if __name__ == "__main__"` テストで動作確認 ✅
-2. **Phase 3**: `python main.py` でFletアプリ起動、全タブの操作を確認 ✅
-3. **Phase 5**: E2Eフロー検証
-   - CSVインポート → 分析 → ⑦モデル確定（DB保存）→ ⑥ARIMA予測（DB保存）→ ⑧ECL計算 → 結果CSV出力
+1. **Phase 6A**: 各修正後に該当ページで動作確認
+2. **Phase 6B**: 全3ページで新式UI動作確認、既存機能の回帰テスト
+3. **Phase 5**: E2Eフロー検証（CSV → 分析 → モデル確定 → ARIMA予測保存 → ECL計算 → CSV出力）

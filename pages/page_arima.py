@@ -40,6 +40,14 @@ def arima_page(page: ft.Page) -> ft.Control:
         width=300,
     )
 
+    # ACF/PACF nlags設定（空欄で自動選択）
+    nlags_input = ft.TextField(
+        label="ACF/PACF nlagsオプション",
+        hint_text="空欄で自動",
+        width=180,
+        keyboard_type=ft.KeyboardType.NUMBER,
+    )
+
     # ARIMA次数設定
     p_input = ft.TextField(label="p (AR)", value="1", width=80, keyboard_type=ft.KeyboardType.NUMBER)
     d_input = ft.TextField(label="d (差分)", value="1", width=80, keyboard_type=ft.KeyboardType.NUMBER)
@@ -90,8 +98,12 @@ def arima_page(page: ft.Page) -> ft.Control:
                     color=ft.Colors.ORANGE_700, size=12,
                 ))
 
-            # ACF/PACF
-            acf_pacf = calc_acf_pacf(y, nlags=20)
+            # ACF/PACF（nlags: 入力フィールドの値 or データ数の1/3を上限とした自動値）
+            if nlags_input.value and nlags_input.value.strip().isdigit():
+                nlags = min(int(nlags_input.value), len(y) - 1)
+            else:
+                nlags = min(20, max(5, len(y) // 3))
+            acf_pacf = calc_acf_pacf(y, nlags=nlags)
             img = plot_acf_pacf(
                 acf_pacf["acf_values"], acf_pacf["pacf_values"],
                 acf_pacf["acf_confint"], acf_pacf["pacf_confint"],
@@ -272,6 +284,10 @@ def arima_page(page: ft.Page) -> ft.Control:
             _help,
             ft.Text("ARIMA分析", size=24, weight=ft.FontWeight.BOLD),
             target_dropdown,
+            ft.Row([
+                nlags_input,
+                ft.Text("空欄でデータ数に応じた自動設定（目安: データ数の1/3以下）", size=11, color=ft.Colors.GREY_600),
+            ]),
             ft.ElevatedButton("ADF検定 + ACF/PACF", on_click=run_adf_test, icon=ft.Icons.ASSESSMENT),
             ft.Divider(),
             ft.Text("手動次数指定", size=16, weight=ft.FontWeight.BOLD),
