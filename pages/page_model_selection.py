@@ -9,6 +9,7 @@ from src.analysis.data_transform import TRANSFORM_METHODS
 from src.analysis.model_selection import search_best_model, filter_models
 from components.help_panel import build_help_panel
 from components.data_source_selector import DataSourceSelector
+from components.variable_selector import VariableSelector
 from src.data.indicator_loader import (
     merge_target_and_indicators,
 )
@@ -22,49 +23,49 @@ def model_selection_page(page: ft.Page) -> ft.Control:
     ind_df_ref = [None]
     tgt_df_ref = [None]
     code_to_name_ref = [{}]
-    target_c2n_ref = [{}]
 
-    # UI部品（データソース変更で再構築）
-    target_dropdown = ft.Dropdown(label="目的変数", width=300)
-    feature_checkboxes = ft.Column(spacing=2)
+    # 変数セレクタ（DataSourceSelector変更時に再構築）
+    selector_container = ft.Column()
+    selector_ref = [None]
 
     def on_data_loaded(indicator_df, target_df, code_to_name, target_c2n):
-        """データソース変更時にUIを再構築する"""
+        """データソース変更時に変数セレクタを再構築する"""
         ind_df_ref[0] = indicator_df
         tgt_df_ref[0] = target_df
         all_c2n = dict(code_to_name)
         all_c2n.update(target_c2n)
         code_to_name_ref[0] = all_c2n
-        target_c2n_ref[0] = target_c2n
 
         columns = indicator_df.columns.tolist() if indicator_df is not None and not indicator_df.empty else []
         target_cols = target_df.columns.tolist() if target_df is not None and not target_df.empty else None
 
-        # 目的変数ドロップダウン更新
-        if target_cols:
-            target_options = target_cols
-            target_name_map = target_c2n
-        else:
-            target_options = columns
-            target_name_map = code_to_name
+        if not columns:
+            selector_container.controls = [
+                ft.Text("説明変数データがありません。データソースを選択してください。", color=ft.Colors.ORANGE_700)
+            ]
+            selector_ref[0] = None
+            page.update()
+            return
 
-        target_dropdown.options = [
-            ft.dropdown.Option(key=c, text=target_name_map.get(c, c)) for c in target_options
-        ]
-        target_dropdown.value = target_options[0] if target_options else None
-
-        # 説明変数チェックボックス更新
-        feature_checkboxes.controls = [
-            ft.Checkbox(label=code_to_name.get(col, col), data=col, value=True)
-            for col in columns
-        ]
-
+        selector_ref[0] = VariableSelector(
+            page=page,
+            columns=columns,
+            show_target=True,
+            show_transform=False,
+            code_to_name=all_c2n,
+            target_columns=target_cols,
+            target_code_to_name=target_c2n,
+        )
+        selector_container.controls = [selector_ref[0].get_ui(height=180)]
         page.update()
 
     data_source = DataSourceSelector(page=page, on_data_loaded=on_data_loaded)
 
     n_features_input = ft.TextField(
-        label="説明変数の数", value="2", width=120,
+        label="組み合わせ変数数",
+        hint_text="例: 2",
+        value="2",
+        width=140,
         keyboard_type=ft.KeyboardType.NUMBER,
     )
     transform_dropdown_ui = ft.Dropdown(
@@ -83,6 +84,7 @@ def model_selection_page(page: ft.Page) -> ft.Control:
         ],
         value="aic", width=200,
     )
+
     # 全結果を保持（VIFフィルタのトグル切り替え時に再フィルタリングするため）
     all_results_ref = [None]
     last_target_ref = [""]
@@ -109,7 +111,13 @@ def model_selection_page(page: ft.Page) -> ft.Control:
 
     def run_analysis(e):
         """分析実行"""
-        target = target_dropdown.value
+        selector = selector_ref[0]
+        if selector is None:
+            result_container.controls = [ft.Text("データソースを選択してください。", color=ft.Colors.RED_700)]
+            page.update()
+            return
+
+        target = selector.get_target()
         if not target:
             result_container.controls = [ft.Text("目的変数を選択してください。", color=ft.Colors.RED_700)]
             page.update()
@@ -117,21 +125,21 @@ def model_selection_page(page: ft.Page) -> ft.Control:
 
         df = ind_df_ref[0]
         target_df = tgt_df_ref[0]
-        c2n = code_to_name_ref[0]
 
         if df is None or df.empty:
             result_container.controls = [ft.Text("説明変数データがありません。", color=ft.Colors.RED_700)]
             page.update()
             return
 
-        feature_cols = [
-            cb.data for cb in feature_checkboxes.controls
-            if isinstance(cb, ft.Checkbox) and cb.value and cb.data != target
-        ]
-        n_feat = int(n_features_input.value)
+        feature_cols = selector.get_selected_features()
+        if not feature_cols:
+            result_container.controls = [ft.Text("説明変数候補を1つ以上チェックしてください。", color=ft.Colors.RED_700)]
+            page.update()
+            return
 
+        n_feat = int(n_features_input.value)
         if n_feat > len(feature_cols):
-            result_container.controls = [ft.Text(f"説明変数の数({n_feat})が候補数({len(feature_cols)})を超えています。", color=ft.Colors.RED_700)]
+            result_container.controls = [ft.Text(f"組み合わせ変数数({n_feat})が候補数({len(feature_cols)})を超えています。", color=ft.Colors.RED_700)]
             page.update()
             return
 
@@ -143,7 +151,7 @@ def model_selection_page(page: ft.Page) -> ft.Control:
 
         def progress_callback(current, total):
             progress_bar.value = current / total
-            progress_text.value = f"{current}/{total}"
+            progress_text.value = f"探索中: {current}/{total}"
             page.update()
 
         try:
@@ -182,6 +190,7 @@ def model_selection_page(page: ft.Page) -> ft.Control:
         except Exception as ex:
             print(f"DEBUG: モデル選択エラー: {ex}")
             progress_bar.visible = False
+            progress_text.value = ""
             result_container.controls = [ft.Text(f"分析エラー: {ex}", color=ft.Colors.RED_700)]
 
         page.update()
@@ -190,8 +199,10 @@ def model_selection_page(page: ft.Page) -> ft.Control:
         """結果テーブルを表示する"""
         result_container.controls.clear()
 
+        c2n = code_to_name_ref[0]
+        target_name = c2n.get(target, target)
         result_container.controls.append(ft.Text("モデル候補の評価結果", size=18, weight=ft.FontWeight.BOLD))
-        result_container.controls.append(ft.Text(f"目的変数: {target} | 表示: {len(results_df)}/{total_count}件"))
+        result_container.controls.append(ft.Text(f"目的変数: {target_name} | 表示: {len(results_df)}/{total_count}件"))
 
         if results_df.empty:
             result_container.controls.append(ft.Text("条件に合うモデルがありません。", italic=True))
@@ -210,7 +221,6 @@ def model_selection_page(page: ft.Page) -> ft.Control:
             "nobs": "観測数",
         }
         display_cols = list(col_labels.keys())
-        c2n = code_to_name_ref[0]
 
         def _make_cell(row, c):
             """セルの内容と色を決定する"""
@@ -257,17 +267,16 @@ def model_selection_page(page: ft.Page) -> ft.Control:
         purpose="説明変数の全組み合わせを自動探索し、AIC・BIC・Adj.R²で最適なモデルを比較します。「VIF < 10 かつ Adj.R² 最大」のモデルが最良候補です。",
         steps=[
             "データソース選択で説明変数・目的変数のデータセットとfrequencyを選ぶ（frequencyを揃える）",
-            "目的変数ドロップダウンで目的変数を選択する",
-            "「説明変数候補」チェックボックスで探索対象の変数を選ぶ（5〜10個程度推奨）",
-            "「説明変数の個数」で最終モデルに含める変数数を指定する（例：2〜3）",
+            "変数セレクタで目的変数を選択し、探索候補にしたい説明変数をチェックする（5〜10個程度推奨）",
+            "「組み合わせ変数数」で1モデルに含める変数の数を指定する（例：2〜3）",
             "データ変換・標準化・ラグ・ソート基準・VIFフィルタを設定する",
             "「組み合わせ探索実行」を押す",
             "結果テーブルでAIC/BICが最小かつVIF < 10のモデルを選択し、③回帰分析で詳細確認する",
         ],
         outputs=[
-            "モデル候補テーブル（features・R²・Adj.R²・AIC・BIC・DW・max_VIF、最大50件）",
-            "max_VIF > 10 のモデルは赤色でハイライト",
-            "表示件数（X/Y件）",
+            "モデル候補テーブル（説明変数・R²・Adj.R²・AIC・BIC・DW・最大VIF、最大50件）",
+            "Adj.R²: 緑≥0.7 / 橙≥0.4 / 赤<0.4、最大VIF: 緑≤10 / 赤>10、F p値: 緑<0.05 / 赤≥0.05",
+            "表示件数（X/Y件）。VIFトグルで即時フィルタリング可能",
         ],
         indicators=[
             {
@@ -296,9 +305,7 @@ def model_selection_page(page: ft.Page) -> ft.Control:
             _help,
             ft.Text("モデル選択（組み合わせ探索）", size=24, weight=ft.FontWeight.BOLD),
             data_source.get_ui(),
-            target_dropdown,
-            ft.Text("説明変数候補:", size=14, weight=ft.FontWeight.BOLD),
-            ft.Container(content=feature_checkboxes, height=150, border=ft.border.all(1, ft.Colors.GREY_300), border_radius=5, padding=8),
+            selector_container,
             ft.Row([n_features_input, transform_dropdown_ui, standardize_switch]),
             ft.Row([lag_slider, sort_dropdown, vif_filter_switch]),
             progress_bar,

@@ -199,8 +199,13 @@ class VariableSelector:
             }
         return settings
 
-    def get_ui(self) -> ft.Control:
+    def get_ui(self, height: int = 200) -> ft.Control:
         """UIコンポーネントを返す
+
+        Parameters
+        ----------
+        height : int
+            説明変数リストの表示高さ（px）。変数が多い場合はスクロールする。
 
         Returns
         -------
@@ -225,7 +230,16 @@ class VariableSelector:
                 )
             )
 
-        controls.append(self._feature_column)
+        # 説明変数リストをスクロール可能なコンテナでラップする
+        controls.append(
+            ft.Container(
+                content=self._feature_column,
+                height=height,
+                border=ft.border.all(1, ft.Colors.GREY_200),
+                border_radius=4,
+                padding=4,
+            )
+        )
 
         return ft.Container(
             content=ft.Column(controls=controls, spacing=8),
