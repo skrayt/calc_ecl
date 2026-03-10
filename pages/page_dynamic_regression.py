@@ -213,10 +213,11 @@ def dynamic_regression_page(page: ft.Page) -> ft.Control:
 
     _help = build_help_panel(
         title="⑤ 動的回帰（変数別設定）",
-        purpose="変数ごとに異なるデータ変換・標準化・ラグを個別指定した柔軟な回帰分析を行います。ECLモデルでは「マクロ経済変数が信用損失に影響するまでのタイムラグ」を変数別に設定できます。",
+        purpose="変数ごとに異なるデータ変換・標準化・ラグを個別指定した回帰分析を行います。②相関分析・③回帰分析・④モデル選択が「全変数に同じ条件を適用して全体傾向を把握する」のに対し、このページは「最終モデルの細かな調整専用」として位置づけられます。④モデル選択で有望な変数の組み合わせを絞り込んだ後、このページで変数別に変換・ラグを最適化してください。",
         steps=[
             "データソース選択で説明変数・目的変数のデータセットとfrequencyを選ぶ（frequencyを揃える）",
             "変数セレクタで目的変数と説明変数を選択する（各変数に変換・標準化を個別設定）",
+            "※ 目的変数（PD/LGD）は変換・標準化の対象外です（下記「設計上の注意」を参照）",
             "「ラグ設定を更新」を押して変数ごとのラグスライダーを表示する",
             "各変数のラグ期間をスライダーで調整する（例: GDP→2期、失業率→1期）",
             "「分析実行」を押す",
@@ -229,6 +230,24 @@ def dynamic_regression_page(page: ft.Page) -> ft.Control:
             "残差プロット",
         ],
         indicators=[
+            {
+                "name": "設計上の注意: 目的変数（PD/LGD）は変換・標準化しない",
+                "criteria": [
+                    {"level": "情報",  "range": "目的変数は変換しない",   "meaning": "PD/LGDは0〜1の比率であり、解釈可能な実測値のまま使用する"},
+                    {"level": "注意",  "range": "目的変数を標準化しない", "meaning": "標準化すると係数の解釈が困難になり、ECL算出時に逆変換が必要になる"},
+                    {"level": "情報",  "range": "説明変数は変換・標準化可", "meaning": "マクロ経済指標は差分・対数変換して定常化するのが一般的"},
+                ],
+                "note": "変数セレクタで目的変数の変換・標準化を設定しても、分析ロジック上は無視されます（目的変数はそのまま使用されます）",
+            },
+            {
+                "name": "このページの推奨ワークフロー（他のページとの使い分け）",
+                "criteria": [
+                    {"level": "情報",  "range": "②相関分析",    "meaning": "変数候補の全体的な相関傾向を把握する（一括変換で均等比較）"},
+                    {"level": "情報",  "range": "④モデル選択",  "meaning": "全組み合わせを網羅的に探索し、有望な変数の組み合わせを絞り込む"},
+                    {"level": "良好",  "range": "⑤動的回帰（本ページ）", "meaning": "絞り込んだ変数を変数別設定で精査する（最終調整フェーズ）"},
+                ],
+                "note": "②〜④は全変数に同じ変換を一括適用する探索フェーズ。このページは変数別の細かな設定が可能な最終調整フェーズです",
+            },
             {
                 "name": "ラグ期間の設定指針",
                 "criteria": [
@@ -255,6 +274,16 @@ def dynamic_regression_page(page: ft.Page) -> ft.Control:
         controls=[
             _help,
             ft.Text("動的回帰（変数別設定）", size=24, weight=ft.FontWeight.BOLD),
+            ft.Container(
+                content=ft.Text(
+                    "📌 このページは変数別設定の最終調整専用です。④モデル選択で有望な変数の組み合わせを絞り込んだ後にご利用ください。"
+                    "　目的変数（PD/LGD）の変換・標準化は行いません。",
+                    size=12, color=ft.Colors.BLUE_800,
+                ),
+                bgcolor=ft.Colors.BLUE_50,
+                border_radius=6,
+                padding=ft.padding.symmetric(horizontal=12, vertical=8),
+            ),
             data_source.get_ui(),
             selector_container,
             ft.Text("変数ごとのラグ設定:", size=14, weight=ft.FontWeight.BOLD),
