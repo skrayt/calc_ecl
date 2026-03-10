@@ -312,7 +312,7 @@ PYTHONPATH=. python main.py
 
 | # | タブ | ファイル | 機能 |
 |---|------|---------|------|
-| 1 | データ閲覧 | `pages/page_data_view.py` | データセット選択・テーブル表示・時系列グラフ |
+| 1 | データ閲覧 | `pages/page_data_view.py` | データセット選択・テーブル表示・時系列グラフ・変換プロット・比較プロット |
 | 2 | 相関分析 | `pages/page_correlation.py` | データソース選択・相関行列ヒートマップ・VIF一覧・VIFクロス表 |
 | 3 | 回帰分析 | `pages/page_regression.py` | データソース選択・OLS回帰・係数テーブル・残差プロット・交差検証 |
 | 4 | モデル選択 | `pages/page_model_selection.py` | データソース選択・全組み合わせ探索・進捗バー・VIFフィルタ |
@@ -324,10 +324,23 @@ PYTHONPATH=. python main.py
 
 | ファイル | 説明 |
 |---------|------|
-| `components/plot_utils.py` | matplotlib→base64変換、各種プロット関数 |
+| `components/plot_utils.py` | matplotlib→base64変換。`plot_single_series`, `plot_residuals`（3プロット構成）, `plot_compare_series`（複数系列比較）, `plot_multi_series`（グリッド表示）を提供 |
 | `components/variable_selector.py` | 目的変数・説明変数の選択UIパーツ |
 | `components/data_source_selector.py` | データソース選択UI（データセット・frequency・セグメント） |
 | `components/help_panel.py` | 折りたたみ式ヘルプパネル |
+
+**① データ閲覧ページのサブタブ構成（`page_data_view.py`）**:
+
+3つのサブタブをボタン切替で実装（`ft.TabBar` は不使用、親Tabsへのイベントバブリング回避のため）。
+
+| サブタブ | 機能 |
+|---------|------|
+| ① 説明変数データ | データセット選択・テーブル表示・時系列プロット・変換後プロット・CSVインポート |
+| ② 目的変数データ | 目的変数データセット選択・テーブル表示・時系列プロット・変換後プロット・CSVインポート |
+| ③ 比較プロット | ①②でロードした変数を横断選択して1グラフに重ね表示（0-1正規化 / 2軸オプション） |
+
+比較プロットは `shared` dict（`{"ind_df", "ind_c2n", "tgt_df", "tgt_c2n"}`）で①②間のデータを共有する。
+`plot_compare_series(series_list, labels, normalize, dual_axis)` を呼び出して生成。
 
 **データソース選択コンポーネント（DataSourceSelector）**:
 
