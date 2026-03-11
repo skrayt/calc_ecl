@@ -21,7 +21,7 @@ from src.data.indicator_loader import (
     get_target_definitions,
 )
 from components.plot_utils import plot_single_series, plot_compare_series
-from src.analysis.data_transform import transform, TRANSFORM_METHODS
+from src.analysis.data_transform import transform, standardize, TRANSFORM_METHODS
 from src.import_indicators import (
     import_csv_gui,
     detect_unknown_columns,
@@ -76,6 +76,7 @@ def data_view_page(page: ft.Page) -> ft.Control:
             options=[ft.dropdown.Option(key=k, text=v) for k, v in TRANSFORM_METHODS.items()],
             value="none", width=200,
         )
+        standardize_switch = ft.Switch(label="標準化（z-score）", value=False)
         transform_plot_button = ft.ElevatedButton(
             "変換してプロット",
             on_click=lambda e: on_transform_plot_click(),
@@ -452,6 +453,11 @@ def data_view_page(page: ft.Page) -> ft.Control:
                 plot_container.controls.append(ft.Row(controls=row_controls, spacing=4))
             page.update()
 
+        def _is_unit_range(series: pd.Series) -> bool:
+            """系列の全値が[0, 1]範囲に収まるか判定する"""
+            valid = series.dropna()
+            return len(valid) > 0 and (valid >= 0).all() and (valid <= 1).all()
+
         def on_transform_plot_click():
             """変換後の時系列グラフをプロットする"""
             df = current_df_ref[0]
@@ -464,6 +470,7 @@ def data_view_page(page: ft.Page) -> ft.Control:
             if not selected:
                 return
             method = transform_dropdown.value or "none"
+            do_std = standardize_switch.value
             plot_container.controls.clear()
             c2n = code_to_name_ref[0]
             N_COLS = 3
@@ -472,9 +479,14 @@ def data_view_page(page: ft.Page) -> ft.Control:
                 label = c2n.get(col, col)
                 try:
                     transformed = transform(df[[col]].copy(), method=method)
+                    if do_std and not _is_unit_range(df[col]):
+                        transformed = standardize(transformed)
+                    suffix = TRANSFORM_METHODS.get(method, method)
+                    if do_std and not _is_unit_range(df[col]):
+                        suffix += "＋標準化"
                     img = plot_single_series(
                         transformed, col,
-                        label=f"{label}（{TRANSFORM_METHODS.get(method, method)}）",
+                        label=f"{label}（{suffix}）",
                         figsize=(5, 3),
                     )
                     cell = ft.Image(src="data:image/png;base64," + img, fit=ft.BoxFit.CONTAIN, expand=True)
@@ -512,7 +524,7 @@ def data_view_page(page: ft.Page) -> ft.Control:
                     height=200, border=ft.border.all(1, ft.Colors.GREY_300), padding=8,
                 ),
                 plot_button,
-                ft.Row([transform_dropdown, transform_plot_button], spacing=8),
+                ft.Row([transform_dropdown, standardize_switch, transform_plot_button], spacing=8),
                 plot_container,
             ],
             spacing=10,
@@ -556,6 +568,7 @@ def data_view_page(page: ft.Page) -> ft.Control:
             options=[ft.dropdown.Option(key=k, text=v) for k, v in TRANSFORM_METHODS.items()],
             value="none", width=200,
         )
+        t_standardize_switch = ft.Switch(label="標準化（z-score）", value=False)
         t_transform_plot_button = ft.ElevatedButton(
             "変換してプロット",
             on_click=lambda e: on_t_transform_plot_click(),
@@ -885,6 +898,11 @@ def data_view_page(page: ft.Page) -> ft.Control:
                 t_plot_container.controls.append(ft.Row(controls=row_controls, spacing=4))
             page.update()
 
+        def _is_t_unit_range(series: pd.Series) -> bool:
+            """系列の全値が[0, 1]範囲に収まるか判定する"""
+            valid = series.dropna()
+            return len(valid) > 0 and (valid >= 0).all() and (valid <= 1).all()
+
         def on_t_transform_plot_click():
             """変換後の目的変数グラフをプロットする"""
             df = current_target_df_ref[0]
@@ -897,6 +915,7 @@ def data_view_page(page: ft.Page) -> ft.Control:
             if not selected:
                 return
             method = t_transform_dropdown.value or "none"
+            do_std = t_standardize_switch.value
             t_plot_container.controls.clear()
             c2n = target_code_to_name_ref[0]
             N_COLS = 3
@@ -905,9 +924,14 @@ def data_view_page(page: ft.Page) -> ft.Control:
                 label = c2n.get(col, col)
                 try:
                     transformed = transform(df[[col]].copy(), method=method)
+                    if do_std and not _is_t_unit_range(df[col]):
+                        transformed = standardize(transformed)
+                    suffix = TRANSFORM_METHODS.get(method, method)
+                    if do_std and not _is_t_unit_range(df[col]):
+                        suffix += "＋標準化"
                     img = plot_single_series(
                         transformed, col,
-                        label=f"{label}（{TRANSFORM_METHODS.get(method, method)}）",
+                        label=f"{label}（{suffix}）",
                         figsize=(5, 3),
                     )
                     cell = ft.Image(src="data:image/png;base64," + img, fit=ft.BoxFit.CONTAIN, expand=True)
@@ -943,7 +967,7 @@ def data_view_page(page: ft.Page) -> ft.Control:
                     height=200, border=ft.border.all(1, ft.Colors.GREY_300), padding=8,
                 ),
                 t_plot_button,
-                ft.Row([t_transform_dropdown, t_transform_plot_button], spacing=8),
+                ft.Row([t_transform_dropdown, t_standardize_switch, t_transform_plot_button], spacing=8),
                 t_plot_container,
             ],
             spacing=10,
@@ -966,7 +990,8 @@ def data_view_page(page: ft.Page) -> ft.Control:
         tgt_checkboxes_col = ft.Column(spacing=2)
 
         normalize_switch = ft.Switch(label="0-1正規化（スケール統一）", value=True)
-        dual_axis_switch = ft.Switch(label="2軸プロット（目的変数を右軸）", value=False)
+        # 右軸選択チェックボックス（変数リスト更新時に構築される）
+        right_axis_checkboxes_col = ft.Column(spacing=2)
 
         refresh_button = ft.ElevatedButton(
             "変数リストを更新",
@@ -1022,6 +1047,24 @@ def data_view_page(page: ft.Page) -> ft.Control:
                 tgt_checkboxes_col.controls = [
                     ft.Text("目的変数データが読み込まれていません。②目的変数データタブでデータを選択してください。", size=11, color=ft.Colors.ORANGE_600)
                 ]
+
+            # 右軸チェックボックス（全変数、デフォルト未選択）
+            all_vars = [
+                (ind_c2n.get(col, col), col) for col in ind_df.columns
+            ]
+            if tgt_df is not None and not tgt_df.empty:
+                all_vars += [(tgt_c2n.get(col, col), col) for col in tgt_df.columns]
+            right_cbs = [
+                ft.Checkbox(label=name, data=col, value=False, expand=True)
+                for name, col in all_vars
+            ]
+            ra_rows = []
+            for i in range(0, len(right_cbs), 3):
+                row_items = right_cbs[i:i + 3]
+                while len(row_items) < 3:
+                    row_items.append(ft.Container(expand=True))
+                ra_rows.append(ft.Row(controls=row_items, spacing=4))
+            right_axis_checkboxes_col.controls = ra_rows
 
             compare_status.value = "変数を選択して「比較プロット実行」を押してください"
             compare_status.color = ft.Colors.GREEN_700
@@ -1079,12 +1122,17 @@ def data_view_page(page: ft.Page) -> ft.Control:
                     page.update()
                     return
 
+                right_axis_selected = [
+                    combined_c2n.get(cb.data, cb.data)
+                    for row in right_axis_checkboxes_col.controls
+                    for cb in row.controls if isinstance(cb, ft.Checkbox) and cb.value
+                ]
                 img = plot_compare_series(
                     series_list=series_list,
                     labels=labels,
                     normalize=normalize_switch.value,
-                    dual_axis=dual_axis_switch.value,
-                    figsize=(14, 5),
+                    right_axis_labels=right_axis_selected if right_axis_selected else None,
+                    figsize=(12, 6),
                 )
                 compare_plot_container.controls.append(
                     ft.Image(src="data:image/png;base64," + img, fit=ft.BoxFit.CONTAIN)
@@ -1109,7 +1157,7 @@ def data_view_page(page: ft.Page) -> ft.Control:
                     bgcolor=ft.Colors.BLUE_50, border_radius=6,
                     padding=ft.padding.symmetric(horizontal=12, vertical=8),
                 ),
-                ft.Row([refresh_button, normalize_switch, dual_axis_switch], spacing=16),
+                ft.Row([refresh_button, normalize_switch], spacing=16),
                 compare_status,
                 ft.Divider(),
                 ft.Text("説明変数（チェックして選択）", size=14, weight=ft.FontWeight.BOLD),
@@ -1120,6 +1168,11 @@ def data_view_page(page: ft.Page) -> ft.Control:
                 ft.Text("目的変数（チェックして選択）", size=14, weight=ft.FontWeight.BOLD),
                 ft.Container(
                     content=ft.Column(controls=[tgt_checkboxes_col], scroll=ft.ScrollMode.AUTO),
+                    height=100, border=ft.border.all(1, ft.Colors.GREY_300), padding=8,
+                ),
+                ft.Text("右軸に割り当てる変数（未選択なら1軸表示）", size=14, weight=ft.FontWeight.BOLD),
+                ft.Container(
+                    content=ft.Column(controls=[right_axis_checkboxes_col], scroll=ft.ScrollMode.AUTO),
                     height=100, border=ft.border.all(1, ft.Colors.GREY_300), padding=8,
                 ),
                 plot_compare_button,
