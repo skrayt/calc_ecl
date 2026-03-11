@@ -11,6 +11,7 @@ from components.help_panel import build_help_panel
 from components.data_source_selector import DataSourceSelector
 from src.analysis.data_transform import transform, standardize, TRANSFORM_METHODS
 from src.analysis.regression import fit_ols, cross_validate
+from src.analysis.correlation import calc_vif
 from src.data.indicator_loader import (
     merge_target_and_indicators,
 )
@@ -126,6 +127,10 @@ def regression_page(page: ft.Page) -> ft.Control:
             # OLS回帰
             ols = fit_ols(y, X, lag=lag)
 
+            # VIF計算（説明変数2つ以上の場合）
+            vif_df = calc_vif(X)
+            vif_dict = dict(zip(vif_df["variable"], vif_df["vif"]))
+
             results = []
             results.append(ft.Text("モデル概要", size=18, weight=ft.FontWeight.BOLD))
 
@@ -151,6 +156,31 @@ def regression_page(page: ft.Page) -> ft.Control:
             results.append(ft.Divider())
             results.append(ft.Text("係数テーブル", size=18, weight=ft.FontWeight.BOLD))
             coef_df = ols["coefficients"]
+            def _vif_color(vif_val):
+                if vif_val is None:
+                    return None
+                if vif_val > 10:
+                    return ft.Colors.RED_700
+                if vif_val > 5:
+                    return ft.Colors.ORANGE_700
+                return None
+
+            coef_rows = []
+            for _, row in coef_df.iterrows():
+                var = row["variable"]
+                vif_val = vif_dict.get(var)
+                vif_text = f"{vif_val:.2f}" if vif_val is not None else "-"
+                coef_rows.append(ft.DataRow(cells=[
+                    ft.DataCell(ft.Text(c2n.get(var, var))),
+                    ft.DataCell(ft.Text(f"{row['coef']:.4f}")),
+                    ft.DataCell(ft.Text(f"{row['std_err']:.4f}")),
+                    ft.DataCell(ft.Text(f"{row['t_stat']:.4f}")),
+                    ft.DataCell(ft.Text(
+                        f"{row['p_value']:.4f}",
+                        color=ft.Colors.RED_700 if row["p_value"] > 0.05 else None,
+                    )),
+                    ft.DataCell(ft.Text(vif_text, color=_vif_color(vif_val))),
+                ]))
             coef_table = ft.DataTable(
                 columns=[
                     ft.DataColumn(ft.Text("変数")),
@@ -158,20 +188,9 @@ def regression_page(page: ft.Page) -> ft.Control:
                     ft.DataColumn(ft.Text("標準誤差"), numeric=True),
                     ft.DataColumn(ft.Text("t値"), numeric=True),
                     ft.DataColumn(ft.Text("p値"), numeric=True),
+                    ft.DataColumn(ft.Text("VIF"), numeric=True),
                 ],
-                rows=[
-                    ft.DataRow(cells=[
-                        ft.DataCell(ft.Text(c2n.get(row["variable"], row["variable"]))),
-                        ft.DataCell(ft.Text(f"{row['coef']:.4f}")),
-                        ft.DataCell(ft.Text(f"{row['std_err']:.4f}")),
-                        ft.DataCell(ft.Text(f"{row['t_stat']:.4f}")),
-                        ft.DataCell(ft.Text(
-                            f"{row['p_value']:.4f}",
-                            color=ft.Colors.RED_700 if row["p_value"] > 0.05 else None,
-                        )),
-                    ])
-                    for _, row in coef_df.iterrows()
-                ],
+                rows=coef_rows,
                 border=ft.border.all(1, ft.Colors.GREY_300),
             )
             results.append(coef_table)

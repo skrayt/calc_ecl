@@ -36,6 +36,8 @@ class VariableSelector:
         Noneの場合はcolumnsから目的変数を選択する（従来動作）。
     target_code_to_name : dict or None
         目的変数コード→日本語名のマッピング。target_columns指定時に使用。
+    unit_range_columns : list[str] or None
+        全値が[0,1]範囲内の変数リスト。該当変数の標準化トグルを無効化する。
     """
 
     def __init__(
@@ -49,6 +51,7 @@ class VariableSelector:
         code_to_name: dict | None = None,
         target_columns: list[str] | None = None,
         target_code_to_name: dict | None = None,
+        unit_range_columns: list[str] | None = None,
     ):
         self.page = page
         self.columns = list(columns)
@@ -58,6 +61,7 @@ class VariableSelector:
         self.code_to_name: dict[str, str] = code_to_name or {}
         self.target_columns = list(target_columns) if target_columns else None
         self.target_code_to_name: dict[str, str] = target_code_to_name or {}
+        self.unit_range_columns: set[str] = set(unit_range_columns or [])
 
         # 目的変数の選択肢を決定
         if self.target_columns is not None:
@@ -127,12 +131,17 @@ class VariableSelector:
                 )
                 row_controls.append(transform_dd)
 
-                # 標準化トグル
+                # 標準化トグル（[0,1]範囲変数は無効化）
+                is_unit_range = col in self.unit_range_columns
                 std_switch = ft.Switch(
-                    label="標準化",
-                    value=self._standardize.get(col, False),
+                    label="標準化" if not is_unit_range else "標準化(不要)",
+                    value=False if is_unit_range else self._standardize.get(col, False),
+                    disabled=is_unit_range,
                     on_change=lambda e, c=col: self._on_standardize_change(e, c),
-                    label_text_style=ft.TextStyle(size=11),
+                    label_text_style=ft.TextStyle(
+                        size=11,
+                        color=ft.Colors.GREY_400 if is_unit_range else None,
+                    ),
                 )
                 row_controls.append(std_switch)
 

@@ -46,6 +46,14 @@ def dynamic_regression_page(page: ft.Page) -> ft.Control:
             page.update()
             return
 
+        # 全値が[0,1]範囲の変数を検出（標準化不要変数）
+        unit_range_cols = []
+        if indicator_df is not None:
+            for col in indicator_df.columns:
+                valid = indicator_df[col].dropna()
+                if len(valid) > 0 and (valid >= 0).all() and (valid <= 1).all():
+                    unit_range_cols.append(col)
+
         selector_ref[0] = VariableSelector(
             page=page,
             columns=columns,
@@ -54,6 +62,7 @@ def dynamic_regression_page(page: ft.Page) -> ft.Control:
             code_to_name=all_c2n,
             target_columns=target_cols,
             target_code_to_name=target_c2n,
+            unit_range_columns=unit_range_cols,
         )
         selector_container.controls = [selector_ref[0].get_ui()]
         page.update()

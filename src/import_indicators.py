@@ -13,6 +13,7 @@
     6. CSVをパースして indicator_data へINSERT
 """
 import argparse
+import calendar
 import json
 import re
 import sys
@@ -222,33 +223,40 @@ def resolve_mapping(csv_path: str, csv_columns: list[str]) -> dict:
 def parse_time_point(time_str: str) -> tuple[date, str] | None:
     """
     CSVの「時点」列をパースして (reference_date, frequency) を返す。
+    reference_date は期末日（月末・四半期末・年末・年度末）で格納する。
     パースできない場合はNoneを返す。
 
     例:
-        '2025年1月'      → (date(2025,1,1), 'monthly')
-        '2025年1-3月期'  → (date(2025,1,1), 'quarterly')
-        '2025年'         → (date(2025,1,1), 'calendar_year')
-        '2025年度'       → (date(2025,4,1), 'fiscal_year')
+        '2025年1月'      → (date(2025,1,31), 'monthly')      # 月末日
+        '2025年1-3月期'  → (date(2025,3,31), 'quarterly')    # 四半期末
+        '2025年'         → (date(2025,12,31), 'calendar_year') # 12月31日
+        '2025年度'       → (date(2026,3,31), 'fiscal_year')  # 翌年3月31日
     """
-    # 月次: 2025年1月
+    # 月次: 2025年1月 → 月末日
     m = re.match(r"^(\d{4})年(\d{1,2})月$", time_str)
     if m:
-        return date(int(m.group(1)), int(m.group(2)), 1), "monthly"
+        year, month = int(m.group(1)), int(m.group(2))
+        last_day = calendar.monthrange(year, month)[1]
+        return date(year, month, last_day), "monthly"
 
-    # 四半期: 2025年1-3月期
+    # 四半期: 2025年1-3月期 → 四半期末日（終了月の末日）
     m = re.match(r"^(\d{4})年(\d{1,2})-(\d{1,2})月期$", time_str)
     if m:
-        return date(int(m.group(1)), int(m.group(2)), 1), "quarterly"
+        year, end_month = int(m.group(1)), int(m.group(3))
+        last_day = calendar.monthrange(year, end_month)[1]
+        return date(year, end_month, last_day), "quarterly"
 
-    # 年度: 2025年度
+    # 年度: 2025年度 → 翌年3月31日
     m = re.match(r"^(\d{4})年度$", time_str)
     if m:
-        return date(int(m.group(1)), 4, 1), "fiscal_year"
+        year = int(m.group(1))
+        return date(year + 1, 3, 31), "fiscal_year"
 
-    # 暦年: 2025年
+    # 暦年: 2025年 → 12月31日
     m = re.match(r"^(\d{4})年$", time_str)
     if m:
-        return date(int(m.group(1)), 1, 1), "calendar_year"
+        year = int(m.group(1))
+        return date(year, 12, 31), "calendar_year"
 
     return None
 

@@ -337,19 +337,22 @@ def data_view_page(page: ft.Page) -> ft.Control:
                 if not df.empty:
                     defs = get_indicator_definitions(df.columns.tolist())
                     code_to_name_ref[0] = dict(zip(defs["indicator_code"], defs["indicator_name"]))
+                    status_text.value = (
+                        f"ID: {dataset_id} | {frequency} | "
+                        f"{df.index.min().date()}〜{df.index.max().date()} | {len(df)}行"
+                    )
+                    status_text.color = ft.Colors.GREEN_700
+                else:
+                    status_text.value = f"ID: {dataset_id} | {frequency} | データなし（0行）"
+                    status_text.color = ft.Colors.ORANGE_700
                 # 比較プロット用に共有参照を更新
                 shared["ind_df"] = df
                 shared["ind_c2n"] = code_to_name_ref[0]
                 page.session.store.set("df", df)
-                status_text.value = (
-                    f"ID: {dataset_id} | {frequency} | "
-                    f"{df.index.min().date()}〜{df.index.max().date()} | {len(df)}行"
-                )
-                status_text.color = ft.Colors.GREEN_700
                 _update_data_table(df)
                 _update_checkboxes(df.columns.tolist())
-                plot_button.disabled = False
-                transform_plot_button.disabled = False
+                plot_button.disabled = df.empty
+                transform_plot_button.disabled = df.empty
                 plot_container.controls.clear()
                 page.update()
             except Exception as ex:
