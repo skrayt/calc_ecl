@@ -252,7 +252,7 @@ def load_arima_forecasts(indicator_code: str | None = None) -> pd.DataFrame:
     try:
         if indicator_code:
             df = pd.read_sql("""
-                SELECT forecast_id, indicator_code, frequency, arima_order,
+                SELECT forecast_id, indicator_code, dataset_id, frequency, arima_order,
                        forecast_steps, scenario_label, note, created_at
                 FROM arima_forecasts
                 WHERE indicator_code = %s
@@ -260,12 +260,23 @@ def load_arima_forecasts(indicator_code: str | None = None) -> pd.DataFrame:
             """, conn, params=(indicator_code,))
         else:
             df = pd.read_sql("""
-                SELECT forecast_id, indicator_code, frequency, arima_order,
+                SELECT forecast_id, indicator_code, dataset_id, frequency, arima_order,
                        forecast_steps, scenario_label, note, created_at
                 FROM arima_forecasts
                 ORDER BY created_at DESC
             """, conn)
         return df
+    finally:
+        conn.close()
+
+
+def delete_arima_forecast(forecast_id: int) -> None:
+    """ARIMA予測結果を削除する"""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM arima_forecasts WHERE forecast_id = %s", (forecast_id,))
+        conn.commit()
     finally:
         conn.close()
 

@@ -8,7 +8,7 @@ import numpy as np
 
 from components.plot_utils import plot_acf_pacf, plot_forecast
 from components.help_panel import build_help_panel
-from src.data.indicator_loader import get_indicator_definitions
+from src.data.indicator_loader import get_indicator_definitions, list_datasets
 from src.analysis.arima import (
     fit_arima,
     auto_select_order,
@@ -16,7 +16,7 @@ from src.analysis.arima import (
     test_stationarity,
     calc_acf_pacf,
 )
-from src.db_operations import save_arima_forecast
+from src.db_operations import save_arima_forecast, load_arima_forecasts, delete_arima_forecast
 
 
 def arima_page(page: ft.Page) -> ft.Control:
@@ -75,37 +75,94 @@ def arima_page(page: ft.Page) -> ft.Control:
         hint_text="例: 2026年度 ベースシナリオ用",
         width=300,
     )
+    fiscal_ym_text = ft.Text("対象決算年月: 読み込み中...", size=12, color=ft.Colors.GREY_700)
     save_status_text = ft.Text("", size=12)
-    save_section = ft.Container(
-        visible=False,
-        content=ft.Column([
-            ft.Text("予測結果をDBに保存", size=14, weight=ft.FontWeight.BOLD),
-            save_note_input,
-            ft.Row([
-                ft.ElevatedButton(
-                    "DBに保存",
-                    icon=ft.Icons.SAVE,
-                    on_click=lambda e: _save_forecast(e),
-                ),
-                save_status_text,
-            ]),
-        ]),
-        padding=10,
-        border=ft.border.all(1, ft.Colors.GREEN_200),
-        border_radius=8,
-        bgcolor=ft.Colors.GREEN_50,
-        margin=ft.margin.only(top=8),
-    )
+    saved_fc_container = ft.Column()
 
-    def _save_forecast(e):
-        """ARIMA予測結果をDBに保存する"""
-        state = last_forecast_ref[0]
-        if state is None:
-            save_status_text.value = "保存するARIMA予測結果がありません。先に予測を実行してください。"
-            save_status_text.color = ft.Colors.RED_700
-            page.update()
+    def _get_fiscal_ym_label(dataset_id) -> str:
+        """dataset_id から fiscal_year_month の表示文字列を返す"""
+        if dataset_id is None:
+            return "（決算年月未設定）"
+        try:
+            datasets = list_datasets()
+            row = datasets[datasets["dataset_id"] == int(dataset_id)]
+            if row.empty:
+                return f"データセットID: {dataset_id}"
+            fym = row.iloc[0]["fiscal_year_month"]
+            if fym is None or str(fym) in ("NaT", "None", "nan"):
+                return f"データセット「{row.iloc[0]['dataset_name']}」（決算年月未設定）"
+            # Timestamp または date オブジェクトの場合
+            if hasattr(fym, "year"):
+                return f"{fym.year}年{fym.month}月期"
+            return str(fym)[:7]
+        except Exception:
+            return f"データセットID: {dataset_id}"
+
+    def _refresh_saved_forecasts():
+        """保存済みARIMA予測一覧（現在の変数）を更新する"""
+        col = target_dropdown.value
+        if not col:
+            saved_fc_container.controls = []
             return
+        try:
+            fc_list = load_arima_forecasts(indicator_code=col)
+            if fc_list.empty:
+                saved_fc_container.controls = [
+                    ft.Text("保存済み予測なし", size=11, color=ft.Colors.GREY_600)
+                ]
+                return
 
+            rows = []
+            for _, r in fc_list.iterrows():
+                fid = int(r["forecast_id"])
+                ds_id = r.get("dataset_id")
+                fy_label = _get_fiscal_ym_label(ds_id) if ds_id is not None else "（未設定）"
+
+                def make_delete(forecast_id):
+                    def on_del(e):
+                        try:
+                            delete_arima_forecast(forecast_id)
+                            _refresh_saved_forecasts()
+                            page.update()
+                        except Exception as ex:
+                            print(f"DEBUG: ARIMA削除エラー: {ex}")
+                    return on_del
+
+                rows.append(ft.DataRow(cells=[
+                    ft.DataCell(ft.Text(fy_label, size=11)),
+                    ft.DataCell(ft.Text(f"ARIMA{r['arima_order']}", size=11)),
+                    ft.DataCell(ft.Text(f"{r['forecast_steps']}期", size=11)),
+                    ft.DataCell(ft.Text(str(r["created_at"])[:10], size=11)),
+                    ft.DataCell(ft.IconButton(
+                        icon=ft.Icons.DELETE_OUTLINE,
+                        icon_color=ft.Colors.RED_400,
+                        tooltip="削除",
+                        on_click=make_delete(fid),
+                    )),
+                ]))
+
+            saved_fc_container.controls = [
+                ft.Text("保存済みARIMA予測（この変数）", size=13, weight=ft.FontWeight.BOLD),
+                ft.DataTable(
+                    columns=[
+                        ft.DataColumn(ft.Text("決算年月")),
+                        ft.DataColumn(ft.Text("次数")),
+                        ft.DataColumn(ft.Text("ステップ")),
+                        ft.DataColumn(ft.Text("保存日")),
+                        ft.DataColumn(ft.Text("操作")),
+                    ],
+                    rows=rows,
+                    border=ft.border.all(1, ft.Colors.GREY_300),
+                ),
+            ]
+        except Exception as ex:
+            saved_fc_container.controls = [
+                ft.Text(f"一覧取得エラー: {ex}", size=11, color=ft.Colors.RED_700)
+            ]
+
+    def _do_save(dataset_id):
+        """実際の保存処理"""
+        state = last_forecast_ref[0]
         fc_df = state["fc_df"]
         try:
             forecast_data = {
@@ -114,8 +171,6 @@ def arima_page(page: ft.Page) -> ft.Control:
                 "lower": [float(v) for v in fc_df["lower"]],
                 "upper": [float(v) for v in fc_df["upper"]],
             }
-            dataset_id = page.session.store.get("dataset_id")
-
             forecast_dict = {
                 "indicator_code": state["indicator_code"],
                 "dataset_id": int(dataset_id) if dataset_id else None,
@@ -128,10 +183,86 @@ def arima_page(page: ft.Page) -> ft.Control:
             fid = save_arima_forecast(forecast_dict)
             save_status_text.value = f"✓ 保存しました（forecast_id: {fid}）"
             save_status_text.color = ft.Colors.GREEN_700
+            _refresh_saved_forecasts()
         except Exception as ex:
             save_status_text.value = f"保存エラー: {ex}"
             save_status_text.color = ft.Colors.RED_700
         page.update()
+
+    def _save_forecast(e):
+        """ARIMA予測結果をDBに保存する（重複チェック付き）"""
+        state = last_forecast_ref[0]
+        if state is None:
+            save_status_text.value = "保存するARIMA予測結果がありません。先に予測を実行してください。"
+            save_status_text.color = ft.Colors.RED_700
+            page.update()
+            return
+
+        dataset_id = page.session.store.get("dataset_id")
+
+        # 同一変数・同一データセットの重複チェック
+        if dataset_id:
+            try:
+                existing = load_arima_forecasts(indicator_code=state["indicator_code"])
+                if not existing.empty:
+                    dup = existing[existing["dataset_id"] == int(dataset_id)]
+                    if not dup.empty:
+                        fy_label = _get_fiscal_ym_label(dataset_id)
+
+                        def do_overwrite(e):
+                            for fid in dup["forecast_id"].tolist():
+                                delete_arima_forecast(int(fid))
+                            _do_save(dataset_id)
+                            page.pop_dialog()
+
+                        def do_cancel(e):
+                            page.pop_dialog()
+                            save_status_text.value = "保存をキャンセルしました。"
+                            save_status_text.color = ft.Colors.GREY_700
+                            page.update()
+
+                        dialog = ft.AlertDialog(
+                            title=ft.Text("同一決算年月の予測が存在します"),
+                            content=ft.Text(
+                                f"変数「{state['indicator_code']}」の{fy_label}向け予測が"
+                                f"既に{len(dup)}件保存されています。\n上書き（既存を削除して新規保存）しますか？"
+                            ),
+                            actions=[
+                                ft.TextButton("上書き保存", on_click=do_overwrite),
+                                ft.TextButton("キャンセル", on_click=do_cancel),
+                            ],
+                        )
+                        page.show_dialog(dialog)
+                        page.update()
+                        return
+            except Exception as ex:
+                print(f"DEBUG: 重複チェックエラー: {ex}")
+
+        _do_save(dataset_id)
+
+    save_section = ft.Container(
+        visible=False,
+        content=ft.Column([
+            ft.Text("予測結果をDBに保存", size=14, weight=ft.FontWeight.BOLD),
+            fiscal_ym_text,
+            save_note_input,
+            ft.Row([
+                ft.ElevatedButton(
+                    "DBに保存",
+                    icon=ft.Icons.SAVE,
+                    on_click=lambda e: _save_forecast(e),
+                ),
+                save_status_text,
+            ]),
+            ft.Divider(),
+            saved_fc_container,
+        ]),
+        padding=10,
+        border=ft.border.all(1, ft.Colors.GREEN_200),
+        border_radius=8,
+        bgcolor=ft.Colors.GREEN_50,
+        margin=ft.margin.only(top=8),
+    )
 
     def run_adf_test(e):
         """ADF検定を実行する"""
@@ -326,6 +457,10 @@ def arima_page(page: ft.Page) -> ft.Control:
             }
             save_status_text.value = ""
             save_section.visible = True
+            # 決算年月ラベルと保存済み一覧を更新
+            dataset_id = page.session.store.get("dataset_id")
+            fiscal_ym_text.value = f"対象決算年月: {_get_fiscal_ym_label(dataset_id)}"
+            _refresh_saved_forecasts()
 
         except Exception as ex:
             results.append(ft.Text(f"予測エラー: {ex}", color=ft.Colors.ORANGE_700))

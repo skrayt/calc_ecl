@@ -14,7 +14,7 @@ from components.help_panel import build_help_panel
 from components.data_source_selector import DataSourceSelector
 from src.analysis.data_transform import transform, standardize, TRANSFORM_METHODS
 from src.analysis.regression import fit_ols
-from src.data.indicator_loader import merge_target_and_indicators
+from src.data.indicator_loader import merge_target_and_indicators, list_datasets
 from src.db_operations import (
     save_model_config,
     save_model_result,
@@ -93,6 +93,7 @@ def model_confirm_page(page: ft.Page) -> ft.Control:
         hint_text="例: 2026年3月期用。失業率・GDP成長率を使用",
         width=400,
     )
+    fiscal_ym_text = ft.Text("対象決算年月: （分析実行後に表示）", size=12, color=ft.Colors.GREY_700)
     save_status_text = ft.Text("", size=12)
     save_btn = ft.ElevatedButton(
         "このモデルをDBに保存",
@@ -100,6 +101,26 @@ def model_confirm_page(page: ft.Page) -> ft.Control:
         disabled=True,
         on_click=lambda e: _save_model(e),
     )
+
+    def _get_fiscal_ym(dataset_id) -> tuple[str, str | None]:
+        """dataset_id から (表示ラベル, ISO文字列) を返す"""
+        if not dataset_id:
+            return "（決算年月未設定）", None
+        try:
+            datasets = list_datasets()
+            row = datasets[datasets["dataset_id"] == int(dataset_id)]
+            if row.empty:
+                return f"データセットID: {dataset_id}", None
+            fym = row.iloc[0]["fiscal_year_month"]
+            if fym is None or str(fym) in ("NaT", "None", "nan"):
+                return f"データセット「{row.iloc[0]['dataset_name']}」（決算年月未設定）", None
+            if hasattr(fym, "year"):
+                label = f"{fym.year}年{fym.month}月期"
+                iso = f"{fym.year:04d}-{fym.month:02d}-01"
+                return label, iso
+            return str(fym)[:7], str(fym)[:10]
+        except Exception:
+            return f"データセットID: {dataset_id}", None
 
     # 保存済みモデル一覧
     saved_models_container = ft.Column()
@@ -215,6 +236,10 @@ def model_confirm_page(page: ft.Page) -> ft.Control:
             result_container.controls = controls
             save_status_text.value = "分析完了。モデル名を入力して「DBに保存」を押してください。"
             save_status_text.color = ft.Colors.BLUE_700
+            # 決算年月ラベルを更新
+            ds_id = data_source._ind_dataset_dd.value
+            fy_label, _ = _get_fiscal_ym(ds_id)
+            fiscal_ym_text.value = f"対象決算年月: {fy_label}"
 
         except Exception as ex:
             print(f"DEBUG: モデル確定 回帰エラー: {ex}")
@@ -253,12 +278,15 @@ def model_confirm_page(page: ft.Page) -> ft.Control:
         try:
             ols = state["ols_result"]
 
-            # hyperparameters に変換設定と feature_stats を保存
+            # hyperparameters に変換設定・feature_stats・決算年月を保存
+            dataset_id_val = data_source._ind_dataset_dd.value
+            _, fiscal_ym_iso = _get_fiscal_ym(dataset_id_val)
             hyperparams = {
                 "transform": state["transform"],
                 "standardize": state["standardize"],
                 "lag": state["lag"],
                 "feature_stats": state["feature_stats"],
+                "fiscal_year_month": fiscal_ym_iso,
             }
 
             # coefficients: {変数名: 係数値} の形に変換
@@ -336,6 +364,25 @@ def model_confirm_page(page: ft.Page) -> ft.Control:
 
                 cid = row["config_id"]
 
+                # hyperparameters から決算年月を取得
+                hyp = row.get("hyperparameters") or {}
+                if isinstance(hyp, str):
+                    try:
+                        import json as _json
+                        hyp = _json.loads(hyp)
+                    except Exception:
+                        hyp = {}
+                fy_iso = hyp.get("fiscal_year_month")
+                if fy_iso:
+                    try:
+                        import datetime
+                        d = datetime.date.fromisoformat(fy_iso)
+                        fy_display = f"{d.year}年{d.month}月期"
+                    except Exception:
+                        fy_display = str(fy_iso)[:7]
+                else:
+                    fy_display = "（未設定）"
+
                 def make_delete(config_id):
                     def on_delete(e):
                         try:
@@ -347,12 +394,11 @@ def model_confirm_page(page: ft.Page) -> ft.Control:
                     return on_delete
 
                 rows.append(ft.DataRow(cells=[
-                    ft.DataCell(ft.Text(str(cid))),
+                    ft.DataCell(ft.Text(fy_display, size=11)),
                     ft.DataCell(ft.Text(row.get("model_name", ""), size=11)),
                     ft.DataCell(ft.Text(row.get("target_variable", ""), size=11)),
                     ft.DataCell(ft.Text(", ".join(features) if isinstance(features, list) else str(features), size=10)),
                     ft.DataCell(ft.Text(adj_r2_str)),
-                    ft.DataCell(ft.Text(str(row.get("frequency", "")))),
                     ft.DataCell(ft.IconButton(
                         icon=ft.Icons.DELETE_OUTLINE,
                         icon_color=ft.Colors.RED_400,
@@ -365,12 +411,11 @@ def model_confirm_page(page: ft.Page) -> ft.Control:
                 ft.Text("保存済みモデル一覧", size=16, weight=ft.FontWeight.BOLD),
                 ft.DataTable(
                     columns=[
-                        ft.DataColumn(ft.Text("ID")),
+                        ft.DataColumn(ft.Text("決算年月")),
                         ft.DataColumn(ft.Text("モデル名")),
                         ft.DataColumn(ft.Text("目的変数")),
                         ft.DataColumn(ft.Text("説明変数")),
                         ft.DataColumn(ft.Text("Adj.R²")),
-                        ft.DataColumn(ft.Text("frequency")),
                         ft.DataColumn(ft.Text("操作")),
                     ],
                     rows=rows,
@@ -427,6 +472,7 @@ def model_confirm_page(page: ft.Page) -> ft.Control:
                 visible=True,
                 content=ft.Column([
                     ft.Text("モデルをDBに保存", size=16, weight=ft.FontWeight.BOLD),
+                    fiscal_ym_text,
                     model_name_input,
                     model_note_input,
                     ft.Row([save_btn, save_status_text]),
