@@ -75,7 +75,7 @@ def arima_page(page: ft.Page) -> ft.Control:
         hint_text="例: 2026年度 ベースシナリオ用",
         width=300,
     )
-    fiscal_ym_text = ft.Text("対象決算年月: 読み込み中...", size=12, color=ft.Colors.GREY_700)
+    fiscal_ym_text = ft.Text("対象決算年月: （決算年月未設定）", size=12, color=ft.Colors.GREY_700)
     save_status_text = ft.Text("", size=12)
     saved_fc_container = ft.Column()
 
@@ -99,24 +99,21 @@ def arima_page(page: ft.Page) -> ft.Control:
             return f"データセットID: {dataset_id}"
 
     def _refresh_saved_forecasts():
-        """保存済みARIMA予測一覧（現在の変数）を更新する"""
-        col = target_dropdown.value
-        if not col:
-            saved_fc_container.controls = []
-            return
+        """保存済みARIMA予測一覧（このデータセットの全変数）を更新する"""
+        dataset_id = page.session.store.get("dataset_id")
         try:
-            fc_list = load_arima_forecasts(indicator_code=col)
+            fc_list = load_arima_forecasts(dataset_id=int(dataset_id) if dataset_id else None)
             if fc_list.empty:
                 saved_fc_container.controls = [
                     ft.Text("保存済み予測なし", size=11, color=ft.Colors.GREY_600)
                 ]
                 return
 
+            fy_label = _get_fiscal_ym_label(dataset_id)
             rows = []
             for _, r in fc_list.iterrows():
                 fid = int(r["forecast_id"])
-                ds_id = r.get("dataset_id")
-                fy_label = _get_fiscal_ym_label(ds_id) if ds_id is not None else "（未設定）"
+                var_name = code_to_name.get(r["indicator_code"], r["indicator_code"])
 
                 def make_delete(forecast_id):
                     def on_del(e):
@@ -130,6 +127,7 @@ def arima_page(page: ft.Page) -> ft.Control:
 
                 rows.append(ft.DataRow(cells=[
                     ft.DataCell(ft.Text(fy_label, size=11)),
+                    ft.DataCell(ft.Text(var_name, size=11)),
                     ft.DataCell(ft.Text(f"ARIMA{r['arima_order']}", size=11)),
                     ft.DataCell(ft.Text(f"{r['forecast_steps']}期", size=11)),
                     ft.DataCell(ft.Text(str(r["created_at"])[:10], size=11)),
@@ -142,10 +140,11 @@ def arima_page(page: ft.Page) -> ft.Control:
                 ]))
 
             saved_fc_container.controls = [
-                ft.Text("保存済みARIMA予測（この変数）", size=13, weight=ft.FontWeight.BOLD),
+                ft.Text("保存済みARIMA予測（このデータセット）", size=13, weight=ft.FontWeight.BOLD),
                 ft.DataTable(
                     columns=[
                         ft.DataColumn(ft.Text("決算年月")),
+                        ft.DataColumn(ft.Text("変数")),
                         ft.DataColumn(ft.Text("次数")),
                         ft.DataColumn(ft.Text("ステップ")),
                         ft.DataColumn(ft.Text("保存日")),
@@ -254,8 +253,6 @@ def arima_page(page: ft.Page) -> ft.Control:
                 ),
                 save_status_text,
             ]),
-            ft.Divider(),
-            saved_fc_container,
         ]),
         padding=10,
         border=ft.border.all(1, ft.Colors.GREEN_200),
@@ -514,6 +511,11 @@ def arima_page(page: ft.Page) -> ft.Control:
             },
         ],
     )
+    # ページ初期表示時に保存済み一覧と決算年月を更新
+    dataset_id = page.session.store.get("dataset_id")
+    fiscal_ym_text.value = f"対象決算年月: {_get_fiscal_ym_label(dataset_id)}"
+    _refresh_saved_forecasts()
+
     return ft.Column(
         controls=[
             _help,
@@ -537,6 +539,7 @@ def arima_page(page: ft.Page) -> ft.Control:
             ft.Divider(),
             result_container,
             save_section,
+            saved_fc_container,
         ],
         spacing=10,
         expand=True,

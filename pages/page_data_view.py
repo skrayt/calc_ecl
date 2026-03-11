@@ -349,6 +349,8 @@ def data_view_page(page: ft.Page) -> ft.Control:
                 shared["ind_df"] = df
                 shared["ind_c2n"] = code_to_name_ref[0]
                 page.session.store.set("df", df)
+                page.session.store.set("dataset_id", dataset_id)
+                page.session.store.set("frequency", frequency)
                 _update_data_table(df)
                 _update_checkboxes(df.columns.tolist())
                 plot_button.disabled = df.empty

@@ -155,7 +155,7 @@ def load_model_result(config_id: int) -> dict | None:
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT
-                    mc.config_id, mc.model_name, mc.target_variable,
+                    mc.config_id, mc.dataset_id, mc.model_name, mc.target_variable,
                     mc.feature_variables, mc.hyperparameters, mc.frequency,
                     mr.metrics, mr.coefficients, mr.result_id
                 FROM model_configs mc
@@ -234,38 +234,49 @@ def save_arima_forecast(forecast_dict: dict) -> int:
         conn.close()
 
 
-def load_arima_forecasts(indicator_code: str | None = None) -> pd.DataFrame:
+def load_arima_forecasts(
+    indicator_code: str | None = None,
+    dataset_id: int | None = None,
+) -> pd.DataFrame:
     """保存済みARIMA予測一覧を返す
 
     Parameters
     ----------
     indicator_code : str or None
         指定した場合はその指標コードのみ返す
+    dataset_id : int or None
+        指定した場合はそのデータセットIDのみ返す
 
     Returns
     -------
     pd.DataFrame
-        カラム: forecast_id, indicator_code, frequency, arima_order,
+        カラム: forecast_id, indicator_code, dataset_id, frequency, arima_order,
                 forecast_steps, scenario_label, note, created_at
+    """
+    conditions = []
+    params = []
+    if indicator_code:
+        conditions.append("indicator_code = %s")
+        params.append(indicator_code)
+    if dataset_id is not None:
+        conditions.append("dataset_id = %s")
+        params.append(dataset_id)
+
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    query = f"""
+        SELECT forecast_id, indicator_code, dataset_id, frequency, arima_order,
+               forecast_steps, scenario_label, note, created_at
+        FROM arima_forecasts
+        {where}
+        ORDER BY created_at DESC
     """
     conn = get_connection()
     try:
-        if indicator_code:
-            df = pd.read_sql("""
-                SELECT forecast_id, indicator_code, dataset_id, frequency, arima_order,
-                       forecast_steps, scenario_label, note, created_at
-                FROM arima_forecasts
-                WHERE indicator_code = %s
-                ORDER BY created_at DESC
-            """, conn, params=(indicator_code,))
-        else:
-            df = pd.read_sql("""
-                SELECT forecast_id, indicator_code, dataset_id, frequency, arima_order,
-                       forecast_steps, scenario_label, note, created_at
-                FROM arima_forecasts
-                ORDER BY created_at DESC
-            """, conn)
-        return df
+        with conn.cursor() as cur:
+            cur.execute(query, params)
+            rows = cur.fetchall()
+            cols = [desc[0] for desc in cur.description]
+        return pd.DataFrame(rows, columns=cols)
     finally:
         conn.close()
 
@@ -361,8 +372,13 @@ def save_ecl_result(ecl_dict: dict) -> int:
         conn.close()
 
 
-def load_ecl_results() -> pd.DataFrame:
+def load_ecl_results(fiscal_year_month=None) -> pd.DataFrame:
     """保存済みECL計算結果一覧を返す
+
+    Parameters
+    ----------
+    fiscal_year_month : date or str or None
+        指定した場合はその決算年月のみ返す
 
     Returns
     -------
@@ -371,25 +387,84 @@ def load_ecl_results() -> pd.DataFrame:
                 weight_downside, fiscal_year_month, note, created_at,
                 model_name, config_id
     """
+    base_query = """
+        SELECT
+            er.ecl_id,
+            er.target_code,
+            er.segment_code,
+            er.weight_base,
+            er.weight_upside,
+            er.weight_downside,
+            er.fiscal_year_month,
+            er.note,
+            er.created_at,
+            mc.model_name,
+            mc.config_id
+        FROM ecl_results er
+        LEFT JOIN model_configs mc ON er.model_config_id = mc.config_id
+    """
+    if fiscal_year_month is not None:
+        query = base_query + " WHERE er.fiscal_year_month = %s ORDER BY er.created_at DESC"
+        params = (fiscal_year_month,)
+    else:
+        query = base_query + " ORDER BY er.created_at DESC"
+        params = ()
+
     conn = get_connection()
     try:
-        df = pd.read_sql("""
-            SELECT
-                er.ecl_id,
-                er.target_code,
-                er.segment_code,
-                er.weight_base,
-                er.weight_upside,
-                er.weight_downside,
-                er.fiscal_year_month,
-                er.note,
-                er.created_at,
-                mc.model_name,
-                mc.config_id
-            FROM ecl_results er
-            LEFT JOIN model_configs mc ON er.model_config_id = mc.config_id
-            ORDER BY er.created_at DESC
-        """, conn)
-        return df
+        with conn.cursor() as cur:
+            cur.execute(query, params)
+            rows = cur.fetchall()
+            cols = [desc[0] for desc in cur.description]
+        return pd.DataFrame(rows, columns=cols)
+    finally:
+        conn.close()
+
+
+def list_ecl_fiscal_year_months() -> list:
+    """保存済みECL結果に含まれる決算年月の一覧を返す（降順）"""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT DISTINCT fiscal_year_month
+                FROM ecl_results
+                ORDER BY fiscal_year_month DESC
+            """)
+            return [row[0] for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def delete_ecl_result(ecl_id: int) -> None:
+    """ECL計算結果を削除する"""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM ecl_results WHERE ecl_id = %s", (ecl_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def load_ecl_result_detail(ecl_id: int) -> list | None:
+    """ECL計算結果の詳細（results JSONB）を返す
+
+    Returns
+    -------
+    list or None
+        例: [{"period": "2026-12-31", "pd_base": 0.02, ...}, ...]
+    """
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT results FROM ecl_results WHERE ecl_id = %s", (ecl_id,))
+            row = cur.fetchone()
+        if row is None:
+            return None
+        results = row[0]
+        if isinstance(results, str):
+            results = json.loads(results)
+        return results
     finally:
         conn.close()

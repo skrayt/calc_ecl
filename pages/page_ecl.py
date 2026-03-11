@@ -5,6 +5,8 @@
 import csv
 import io
 import json
+import platform
+import subprocess
 
 import flet as ft
 import pandas as pd
@@ -18,7 +20,12 @@ from src.db_operations import (
     load_arima_forecasts,
     load_arima_forecast_data,
     save_ecl_result,
+    load_ecl_results,
+    list_ecl_fiscal_year_months,
+    delete_ecl_result,
+    load_ecl_result_detail,
 )
+from src.data.indicator_loader import list_datasets
 
 try:
     import matplotlib.pyplot as plt
@@ -292,9 +299,24 @@ def ecl_page(page: ft.Page) -> ft.Control:
                     row_data["ecl_amount"] = float(ecl["ecl_amount"].get(idx, float("nan")))
                 result_rows.append(row_data)
 
+            # 決算年月をモデルのdataset_idから自動取得
+            fiscal_ym = None
+            try:
+                ds_id = model_data.get("dataset_id")
+                if ds_id is not None:
+                    datasets = list_datasets()
+                    ds_row = datasets[datasets["dataset_id"] == int(ds_id)]
+                    if not ds_row.empty:
+                        fym = ds_row.iloc[0]["fiscal_year_month"]
+                        if fym is not None and str(fym) not in ("NaT", "None", "nan"):
+                            fiscal_ym = fym
+            except Exception as ex:
+                print(f"DEBUG: fiscal_year_month取得エラー: {ex}")
+
             last_ecl_ref[0] = {
                 "model_config_id": int(model_dd.value),
                 "target_code": model_data["target_variable"],
+                "fiscal_year_month": fiscal_ym,
                 "weight_base": w_base,
                 "weight_upside": w_up,
                 "weight_downside": w_down,
@@ -392,10 +414,167 @@ def ecl_page(page: ft.Page) -> ft.Control:
             ecl_id = save_ecl_result(ecl_state)
             save_status_text.value = f"✓ DBに保存しました（ecl_id: {ecl_id}）"
             save_status_text.color = ft.Colors.GREEN_700
+            _refresh_saved_ecl()
         except Exception as ex:
             save_status_text.value = f"保存エラー: {ex}"
             save_status_text.color = ft.Colors.RED_700
         page.update()
+
+    # ── 保存済みECL一覧 ────────────────────────────────
+    saved_ecl_filter_dd = ft.Dropdown(
+        label="決算年月でフィルター",
+        width=200,
+        value=None,
+    )
+    saved_ecl_container = ft.Column()
+
+    def _refresh_saved_ecl(e=None):
+        """保存済みECL結果一覧を更新する"""
+        try:
+            # フィルタ用ドロップダウンを更新
+            fyms = list_ecl_fiscal_year_months()
+            current_filter = saved_ecl_filter_dd.value
+            saved_ecl_filter_dd.options = [
+                ft.dropdown.Option(key="", text="（すべて）"),
+            ] + [
+                ft.dropdown.Option(
+                    key=str(f),
+                    text=(f"{f.year}年{f.month}月期" if hasattr(f, "year") else str(f)[:7]),
+                )
+                for f in fyms
+            ]
+            # 現在の選択値が消えた場合はリセット
+            valid_keys = {str(f) for f in fyms} | {""}
+            if current_filter not in valid_keys:
+                saved_ecl_filter_dd.value = ""
+
+            # フィルタ値でECL一覧を取得
+            fym_filter = saved_ecl_filter_dd.value or None
+            df = load_ecl_results(fiscal_year_month=fym_filter)
+
+            if df.empty:
+                saved_ecl_container.controls = [
+                    ft.Text("保存済みECL結果なし", size=11, color=ft.Colors.GREY_600)
+                ]
+                page.update()
+                return
+
+            rows = []
+            for _, r in df.iterrows():
+                eid = int(r["ecl_id"])
+                fym = r["fiscal_year_month"]
+                if fym is not None and hasattr(fym, "year"):
+                    fym_label = f"{fym.year}年{fym.month}月期"
+                elif fym is not None:
+                    fym_label = str(fym)[:7]
+                else:
+                    fym_label = "（未設定）"
+
+                def make_delete(ecl_id):
+                    def on_del(e):
+                        try:
+                            delete_ecl_result(ecl_id)
+                            _refresh_saved_ecl()
+                            page.update()
+                        except Exception as ex:
+                            print(f"DEBUG: ECL削除エラー: {ex}")
+                    return on_del
+
+                def make_detail(ecl_id, title):
+                    def on_detail(e):
+                        try:
+                            detail = load_ecl_result_detail(ecl_id)
+                            if not detail:
+                                return
+                            has_amount = "ecl_amount" in detail[0]
+                            col_headers = ["時点", "PD(ベース)", "PD(楽観)", "PD(悲観)", "PD加重", "LGD", "ECL率"]
+                            if has_amount:
+                                col_headers.append("ECL金額(億円)")
+                            detail_rows = []
+                            for row in detail:
+                                cells = [
+                                    ft.DataCell(ft.Text(str(row.get("period", ""))[:10], size=11)),
+                                    ft.DataCell(ft.Text(f"{row.get('pd_base', 0):.4f}", size=11)),
+                                    ft.DataCell(ft.Text(f"{row.get('pd_upside', 0):.4f}", size=11)),
+                                    ft.DataCell(ft.Text(f"{row.get('pd_downside', 0):.4f}", size=11)),
+                                    ft.DataCell(ft.Text(f"{row.get('pd_weighted', 0):.4f}", size=11, weight=ft.FontWeight.BOLD)),
+                                    ft.DataCell(ft.Text(f"{row.get('lgd', 0):.2%}", size=11)),
+                                    ft.DataCell(ft.Text(f"{row.get('ecl_rate', 0):.4%}", size=11, color=ft.Colors.BLUE_700)),
+                                ]
+                                if has_amount:
+                                    cells.append(ft.DataCell(ft.Text(f"{row.get('ecl_amount', 0):.2f}", size=11)))
+                                detail_rows.append(ft.DataRow(cells=cells))
+
+                            dialog = ft.AlertDialog(
+                                title=ft.Text(f"ECL結果詳細: {title}"),
+                                content=ft.Container(
+                                    content=ft.Column(
+                                        controls=[ft.DataTable(
+                                            columns=[ft.DataColumn(ft.Text(h, size=11)) for h in col_headers],
+                                            rows=detail_rows,
+                                            border=ft.border.all(1, ft.Colors.GREY_300),
+                                        )],
+                                        scroll=ft.ScrollMode.AUTO,
+                                    ),
+                                    width=700,
+                                    height=400,
+                                ),
+                                actions=[ft.TextButton("閉じる", on_click=lambda e: page.pop_dialog())],
+                            )
+                            page.show_dialog(dialog)
+                            page.update()
+                        except Exception as ex:
+                            print(f"DEBUG: ECL詳細エラー: {ex}")
+                    return on_detail
+
+                detail_title = f"{fym_label} {r.get('model_name', '')} {r['segment_code']}"
+                rows.append(ft.DataRow(cells=[
+                    ft.DataCell(ft.Text(fym_label, size=11)),
+                    ft.DataCell(ft.Text(str(r.get("model_name", "")), size=11)),
+                    ft.DataCell(ft.Text(str(r["segment_code"]), size=11)),
+                    ft.DataCell(ft.Text(
+                        f"B:{r['weight_base']:.0%}/U:{r['weight_upside']:.0%}/D:{r['weight_downside']:.0%}",
+                        size=11,
+                    )),
+                    ft.DataCell(ft.Text(str(r["created_at"])[:10], size=11)),
+                    ft.DataCell(ft.Row([
+                        ft.IconButton(
+                            icon=ft.Icons.TABLE_VIEW,
+                            icon_color=ft.Colors.BLUE_400,
+                            tooltip="詳細表示",
+                            on_click=make_detail(eid, detail_title),
+                        ),
+                        ft.IconButton(
+                            icon=ft.Icons.DELETE_OUTLINE,
+                            icon_color=ft.Colors.RED_400,
+                            tooltip="削除",
+                            on_click=make_delete(eid),
+                        ),
+                    ])),
+                ]))
+
+            saved_ecl_container.controls = [
+                ft.DataTable(
+                    columns=[
+                        ft.DataColumn(ft.Text("決算年月")),
+                        ft.DataColumn(ft.Text("モデル")),
+                        ft.DataColumn(ft.Text("セグメント")),
+                        ft.DataColumn(ft.Text("ウェイト")),
+                        ft.DataColumn(ft.Text("保存日")),
+                        ft.DataColumn(ft.Text("詳細/削除")),
+                    ],
+                    rows=rows,
+                    border=ft.border.all(1, ft.Colors.GREY_300),
+                    column_spacing=16,
+                ),
+            ]
+        except Exception as ex:
+            saved_ecl_container.controls = [
+                ft.Text(f"一覧取得エラー: {ex}", size=11, color=ft.Colors.RED_700)
+            ]
+        page.update()
+
+    saved_ecl_filter_dd.on_change = _refresh_saved_ecl
 
     def export_csv(e):
         """ECL計算結果をCSVエクスポートする（クリップボードに出力）"""
@@ -412,7 +591,13 @@ def ecl_page(page: ft.Page) -> ft.Control:
             writer.writeheader()
             writer.writerows(rows)
             csv_str = buf.getvalue()
-            page.set_clipboard(csv_str)
+            _system = platform.system()
+            if _system == "Darwin":
+                subprocess.run(["pbcopy"], input=csv_str.encode("utf-8"), check=True)
+            elif _system == "Windows":
+                subprocess.run(["clip"], input=csv_str.encode("utf-16"), check=True)
+            else:
+                raise RuntimeError(f"クリップボードコピー未対応OS: {_system}")
             save_status_text.value = "✓ CSVをクリップボードにコピーしました。テキストエディタ・Excelに貼り付けてください。"
             save_status_text.color = ft.Colors.GREEN_700
         except Exception as ex:
@@ -422,6 +607,7 @@ def ecl_page(page: ft.Page) -> ft.Control:
 
     # 初期ロード
     _load_models()
+    _refresh_saved_ecl()
 
     _help = build_help_panel(
         title="⑧ ECL計算",
@@ -514,6 +700,13 @@ def ecl_page(page: ft.Page) -> ft.Control:
                                    icon=ft.Icons.COPY, on_click=export_csv),
                 save_status_text,
             ]),
+            ft.Divider(),
+            ft.Text("保存済みECL計算結果", size=16, weight=ft.FontWeight.BOLD),
+            ft.Row([
+                saved_ecl_filter_dd,
+                ft.IconButton(icon=ft.Icons.REFRESH, tooltip="一覧を更新", on_click=_refresh_saved_ecl),
+            ]),
+            saved_ecl_container,
         ],
         spacing=10,
         expand=True,
