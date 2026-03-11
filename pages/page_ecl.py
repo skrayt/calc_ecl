@@ -149,7 +149,7 @@ def ecl_page(page: ft.Page) -> ft.Control:
                     dd_options = [
                         ft.dropdown.Option(
                             key=str(r["forecast_id"]),
-                            text=f"ID:{r['forecast_id']} ARIMA{r['arima_order']} {r['forecast_steps']}期 {r['created_at'][:10]}",
+                            text=f"ID:{r['forecast_id']} ARIMA{r['arima_order']} {r['forecast_steps']}期 {str(r['created_at'])[:10]}",
                         )
                         for _, r in fc_list.iterrows()
                     ]

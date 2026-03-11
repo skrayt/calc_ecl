@@ -239,6 +239,17 @@ def model_confirm_page(page: ft.Page) -> ft.Control:
             page.update()
             return
 
+        # 同名モデルの重複チェック
+        try:
+            existing = load_model_configs()
+            if not existing.empty and model_name in existing["model_name"].values:
+                save_status_text.value = f"同名のモデル「{model_name}」が既に存在します。別名を使用するか、既存モデルを削除してください。"
+                save_status_text.color = ft.Colors.RED_700
+                page.update()
+                return
+        except Exception:
+            pass  # DB取得失敗時は保存を続行
+
         try:
             ols = state["ols_result"]
 
@@ -293,6 +304,7 @@ def model_confirm_page(page: ft.Page) -> ft.Control:
 
             save_status_text.value = f"✓ モデルをDBに保存しました（config_id: {config_id}）"
             save_status_text.color = ft.Colors.GREEN_700
+            save_btn.disabled = True  # 再実行するまで重複保存を防ぐ
             _refresh_saved_models()
 
         except Exception as ex:
