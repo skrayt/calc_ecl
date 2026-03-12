@@ -44,14 +44,18 @@ try:
 except ImportError:
     pass
 
-_available_fonts = _get_available_fonts(_jp_font_candidates) + ["DejaVu Sans"]
+_available_fonts = _get_available_fonts(_jp_font_candidates)
 
 # seabornの設定（先に行う。set_styleはrcParamsを上書きするためフォント設定より前に実行する）
 sns.set_style("whitegrid")
 
 # フォント設定はset_styleの後に行う（set_styleによる上書きを防ぐため）
-plt.rcParams["font.family"] = "sans-serif"
-plt.rcParams["font.sans-serif"] = _available_fonts
+# 日本語フォントが見つかった場合はfont.familyに直接指定する（sans-serif経由だと上書きされる問題を回避）
+if _available_fonts:
+    plt.rcParams["font.family"] = _available_fonts[0]
+else:
+    plt.rcParams["font.family"] = "sans-serif"
+    plt.rcParams["font.sans-serif"] = ["DejaVu Sans"]
 plt.rcParams["axes.unicode_minus"] = False
 
 # デフォルトのfigsize
