@@ -2,8 +2,10 @@ services:
   - type: web
     name: calc-ecl
     runtime: python
-    # 依存パッケージインストール + matplotlibフォントキャッシュ事前構築（起動タイムアウト防止）
-    buildCommand: "pip install -r requirements-web.txt && python -c \"import japanize_matplotlib; import matplotlib.font_manager\""
+    # 依存パッケージインストール
+    # 注: japanize_matplotlibはPython 3.12非対応(distutils削除)のためimport不可
+    #     フォントファイル(ipaexg.ttf)はパッケージから直接パスで登録する（plot_utils.py参照）
+    buildCommand: "pip install -r requirements-web.txt"
     startCommand: python main.py
     envVars:
       - key: FLET_WEB

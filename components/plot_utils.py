@@ -46,6 +46,22 @@ except ImportError:
 
 _available_fonts = _get_available_fonts(_jp_font_candidates)
 
+# japanize_matplotlibのフォントファイルを直接パスで登録する
+# Python 3.12では distutils が削除されたため import japanize_matplotlib は失敗するが、
+# パッケージインストール時にコピーされたフォントファイル（ipaexg.ttf）は利用可能
+if not _available_fonts:
+    try:
+        import importlib.util as _ilu
+        import pathlib as _pl
+        _spec = _ilu.find_spec("japanize_matplotlib")
+        if _spec and _spec.origin:
+            _font_path = _pl.Path(_spec.origin).parent / "fonts" / "ipaexg.ttf"
+            if _font_path.exists():
+                _fm.fontManager.addfont(str(_font_path))
+                _available_fonts = _get_available_fonts(_jp_font_candidates)
+    except Exception:
+        pass
+
 # seabornの設定（先に行う。set_styleはrcParamsを上書きするためフォント設定より前に実行する）
 sns.set_style("whitegrid")
 
