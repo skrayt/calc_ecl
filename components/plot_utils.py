@@ -29,10 +29,7 @@ def _get_available_fonts(candidates: list[str]) -> list[str]:
     return [f for f in candidates if f in registered]
 
 _jp_font_candidates = [
-    "Noto Sans CJK JP",          # Linux（Render/Ubuntu: fonts-noto-cjk）
-    "Noto Sans CJK SC",          # Linux（Noto CJK 代替名）
-    "Noto Sans JP",              # Linux（Noto Sans JP）
-    "NotoSansCJK-Regular",       # Linux（ファイル名由来）
+    "IPAexGothic",               # japanize-matplotlib（Linux/Web環境）
     "Yu Gothic",                 # Windows（WinPython標準）
     "Meiryo",                    # Windows
     "MS Gothic",                 # Windows（フォールバック）
@@ -40,25 +37,14 @@ _jp_font_candidates = [
     "Hiragino Sans",             # macOS新
     "Hiragino Maru Gothic Pro",  # macOS旧
 ]
-_available_fonts = _get_available_fonts(_jp_font_candidates)
 
-# フォントキャッシュに日本語フォントが見つからない場合、システムフォントを直接スキャンして追加する
-# （Linux/Render環境でfontManager.rebuild()は存在しないため、addfont()を使用）
-if not _available_fonts:
-    import glob as _glob
-    _font_search_dirs = ["/usr/share/fonts", "/usr/local/share/fonts"]
-    for _font_dir in _font_search_dirs:
-        for _font_path in (
-            _glob.glob(f"{_font_dir}/**/*.otf", recursive=True)
-            + _glob.glob(f"{_font_dir}/**/*.ttf", recursive=True)
-        ):
-            try:
-                _fm.fontManager.addfont(_font_path)
-            except Exception:
-                pass
-    _available_fonts = _get_available_fonts(_jp_font_candidates)
+# japanize_matplotlibがあれば先にインポートしてIPAexGothicを登録する（Linux/Web環境向け）
+try:
+    import japanize_matplotlib as _jm  # noqa: F401
+except ImportError:
+    pass
 
-_available_fonts = _available_fonts + ["Arial"]
+_available_fonts = _get_available_fonts(_jp_font_candidates) + ["DejaVu Sans"]
 
 # seabornの設定（先に行う。set_styleはrcParamsを上書きするためフォント設定より前に実行する）
 sns.set_style("whitegrid")

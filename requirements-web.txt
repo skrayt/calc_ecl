@@ -23,6 +23,7 @@ joblib==1.5.3
 kiwisolver==1.4.9
 markdown-it-py==4.0.0
 MarkupSafe==3.0.3
+japanize-matplotlib
 matplotlib==3.10.8
 mdurl==0.1.2
 msgpack==1.1.2
