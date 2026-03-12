@@ -35,8 +35,14 @@ IFRS9/ECLモデルの将来予想に必要な統計分析機能をFlet GUIアプ
 | **Phase 7D** | **データ閲覧改善（標準化スイッチ・比較プロット右軸選択）** | **完了** |
 | **Phase 7E** | **回帰VIF列追加・動的回帰標準化トグル無効化** | **完了** |
 | **Phase 7F** | **ARIMA/ECL一覧改善・ECL詳細表示・決算年月自動設定** | **完了** |
+| **Phase W1** | **DB接続二重化（環境変数フォールバック）** | **完了** |
+| **Phase W2** | **main.py Web/デスクトップ切替** | **完了** |
+| **Phase W3** | **Supabase DBセットアップ（手動作業）** | **完了** |
+| **Phase W4** | **Renderデプロイ設定** | **完了** |
+| **Phase W5** | **FilePickerのWeb対応** | **未着手** |
+| **Phase W6** | **ドキュメント更新（Web公開対応）** | **未着手** |
 
-**実装順序: Phase 6A → 6B → 6C → 6D → 6E → 6F → Phase 5 → Phase 7A → 7B → 7C → 7D → 7E → 7F**
+**実装順序: Phase 6A → 6B → 6C → 6D → 6E → 6F → Phase 5 → Phase 7A → 7B → 7C → 7D → 7E → 7F → Phase W1 → W2 → W3 → W4 → W5 → W6**
 
 ---
 
@@ -664,3 +670,192 @@ load_ecl_results() -> pd.DataFrame
 1. **Phase 6A**: 各修正後に該当ページで動作確認
 2. **Phase 6B**: 全3ページで新式UI動作確認、既存機能の回帰テスト
 3. **Phase 5**: E2Eフロー検証（CSV → 分析 → モデル確定 → ARIMA予測保存 → ECL計算 → CSV出力）
+
+---
+
+## Phase W: Web公開（Render + Supabase）（2026-03-11 追加）
+
+### アーキテクチャ
+
+```
+[ローカル開発]                    [Web公開]
+  Fletデスクトップ                  Flet Webモード
+  + config/db.ini                   + Render環境変数
+  + ローカルPostgreSQL              + Supabase (PostgreSQL)
+```
+
+**設計方針**: ローカル開発フローは一切壊さない。環境変数の有無で自動切替。
+
+### セキュリティ設計
+
+| 項目 | 方針 |
+|------|------|
+| DB接続情報 | Render環境変数で管理（暗号化保存） |
+| `config/db.ini` | .gitignore済み（ローカル専用） |
+| `.env` | .gitignoreに追加（ローカルテスト用） |
+| service_role key | Render環境変数のみ、絶対にGitに入れない |
+| Supabase RLS | 全テーブルに設定（用途に応じてポリシー定義） |
+| GitHubリポジトリ | private推奨 |
+
+---
+
+### W1: DB接続二重化（環境変数フォールバック）
+
+**変更ファイル**: `config/db.py` のみ
+
+**変更内容**:
+```python
+# _load_config() のロジック変更:
+# 1. db.ini が存在する → 従来通り configparser で読む
+# 2. db.ini が存在しない → os.environ から読む
+#    - DATABASE_URL があれば → パースして接続パラメータに変換
+#    - 個別環境変数 (DB_HOST等) があれば → dictに変換
+# 3. どちらも無い → FileNotFoundError（従来と同じ）
+
+# get_connection() の変更:
+# - Supabase接続時は sslmode=require が必要
+# - cfg に "sslmode" キーがあれば connect() に渡す
+```
+
+**ポイント**:
+- `get_connection()` のインターフェースは不変 → 呼び出し側7ファイルの変更不要
+- Supabase pooler (port 6543, Transaction mode) では `SET search_path` がリセットされる
+- → Session mode (port 5432) を使用するか、各クエリでスキーマを明示指定
+
+---
+
+### W2: main.py Web/デスクトップ切替
+
+**変更ファイル**: `main.py` のみ
+
+**変更内容**:
+```python
+# 1. page.window.* 設定を条件分岐でガード
+if not page.web:  # デスクトップ時のみ
+    page.window.resizable = True
+    page.window.width = 1400
+    ...
+
+# 2. エントリポイント切替
+if __name__ == "__main__":
+    import os
+    if os.environ.get("FLET_WEB", "").strip() == "1":
+        ft.app(target=main, view=ft.AppView.WEB_BROWSER,
+               port=int(os.environ.get("PORT", "8550")))
+    else:
+        ft.run(main)  # 従来のデスクトップモード
+```
+
+**ポイント**: Renderは `PORT` 環境変数を自動設定する
+
+---
+
+### W3: Supabase DBセットアップ（手動作業）
+
+**作業手順**:
+1. Supabaseプロジェクト作成
+2. SQL Editorで `db/migrations/001〜005` を順番に実行
+3. RLSポリシー設定（`db/migrations/006_supabase_rls_setup.sql` を新規作成・実行）
+4. 接続文字列を取得（Project Settings > Database > Connection string）
+
+**新規ファイル**: `db/migrations/006_supabase_rls_setup.sql`
+
+**注意点**:
+- Supabaseのデフォルトdb名は `postgres`（ローカルの `craft` ではない）
+- `CREATE SCHEMA IF NOT EXISTS calc_ecl` で対応可能
+- SERIAL, JSONB, GIN INDEX, BYTEA 全てSupabase互換
+
+---
+
+### W4: Renderデプロイ設定
+
+**新規ファイル**:
+
+1. `render.yaml` — Render Blueprint
+```yaml
+services:
+  - type: web
+    name: calc-ecl
+    runtime: python
+    buildCommand: pip install -r requirements-web.txt
+    startCommand: python main.py
+    envVars:
+      - key: FLET_WEB
+        value: "1"
+      - key: DATABASE_URL
+        sync: false  # Render dashboardで手動設定
+      - key: DB_SCHEMA
+        value: calc_ecl
+```
+
+2. `requirements-web.txt` — Web版用依存パッケージ
+   - `requirements.txt` から `flet-desktop==0.81.0` と `flet-cli==0.81.0` を除外
+   - それ以外はそのまま
+
+**変更ファイル**: `.gitignore` に `.env` を追加
+
+**日本語フォント対応**:
+- Render build command に `apt-get install -y fonts-noto-cjk` が必要
+- または `render.yaml` の `buildCommand` を拡張
+
+---
+
+### W5: FilePickerのWeb対応（最大の改修ポイント）
+
+**変更ファイル**:
+- `pages/page_data_view.py`
+- `src/import_indicators.py`
+- `src/import_targets.py`
+
+**問題**: Flet WebではFilePickerがアップロード方式に変わる。`files[0].path` でローカルパスを直読みするコードが動かない。
+
+**解決方針**:
+1. `page.web` で分岐
+   - デスクトップ時: 従来通り `files[0].path`
+   - Web時: `ft.FilePickerUploadFile` でアップロード → 一時ファイルとして処理
+2. `import_indicators.py` / `import_targets.py` の `import_csv()` シグネチャ拡張:
+   - `csv_path: str | None = None, csv_content: str | None = None`
+   - パスが渡されたら従来通り、contentが渡されたら `io.StringIO` で処理
+
+**代替案**: WebではテキストエリアにCSVを貼り付ける方式（Flet Web FilePickerの挙動が不安定な場合）
+
+---
+
+### W6: ドキュメント更新
+
+| ファイル | 追記内容 |
+|---------|---------|
+| `docs/system_manual.md` | Web版アーキテクチャ・デプロイ手順 |
+| `docs/operation_manual.md` | Web版アクセス方法・CSVインポート操作変更 |
+| `CLAUDE.md` | Web版の設計原則とデプロイターゲット |
+| `docs/implementation_plan.md` | Phase W進捗更新 |
+
+---
+
+### Phase W 実装順序
+
+```
+W1（DB接続二重化）     ← 最初。既存コード影響ゼロ
+  ↓
+W2（Web起動切替）       ← main.py のみ
+  ↓
+W3（Supabase構築）      ← 手動作業。Supabaseアカウント必要
+  ↓
+W4（Renderデプロイ）    ← 新規ファイル追加のみ
+  ↓
+  ★ デプロイ検証（CSVインポート以外の全機能をWeb上で確認）
+  ↓
+W5（FilePicker対応）    ← 最もリスク高。検証後に着手
+  ↓
+W6（ドキュメント）      ← 最後
+```
+
+### 潜在的な課題
+
+| 課題 | リスク | 対策 |
+|------|--------|------|
+| Flet 0.81.0 Webモードの安定性 | 中 | show_dialog/TabBar等のWeb挙動を要検証 |
+| Render無料枠のRAM (512MB) | 中 | pandas/statsmodels/matplotlibが重い。メモリ不足時はプラン変更検討 |
+| 日本語フォント | 低 | build commandでfonts-noto-cjk インストール |
+| Supabase接続プール | 中 | Session mode (port 5432) を使用 |
+| BYTEA列 (model_binary) | 低 | 大きなpickleオブジェクトの格納制限確認が必要 |

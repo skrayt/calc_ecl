@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: calc-ecl
+    runtime: python
+    # 日本語フォントインストール + 依存パッケージインストール
+    buildCommand: "apt-get install -y fonts-noto-cjk && pip install -r requirements-web.txt"
+    startCommand: python main.py
+    envVars:
+      - key: FLET_WEB
+        value: "1"
+      - key: DATABASE_URL
+        sync: false  # Render dashboardで手動設定（接続文字列を貼り付ける）
+      - key: DB_SCHEMA
+        value: calc_ecl
+      - key: DB_SSLMODE
+        value: require

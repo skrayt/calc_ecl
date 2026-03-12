@@ -22,12 +22,13 @@ def main(page: ft.Page):
     page.title = "ECL将来予想モデル"
     page.theme_mode = ft.ThemeMode.LIGHT
 
-    # ウィンドウサイズ可変対応
-    page.window.resizable = True
-    page.window.width = 1400
-    page.window.height = 900
-    page.window.min_width = 800
-    page.window.min_height = 600
+    # ウィンドウサイズ設定（デスクトップ時のみ。Webモードでは page.web=True になる）
+    if not page.web:
+        page.window.resizable = True
+        page.window.width = 1400
+        page.window.height = 900
+        page.window.min_width = 800
+        page.window.min_height = 600
 
     # タブの本体表示領域
     body = ft.Column(scroll=ft.ScrollMode.AUTO, expand=True)
@@ -106,4 +107,14 @@ def main(page: ft.Page):
 
 
 if __name__ == "__main__":
-    ft.run(main)
+    import os
+    if os.environ.get("FLET_WEB", "").strip() == "1":
+        # Web/Renderモード: ブラウザ向けに起動
+        ft.app(
+            target=main,
+            view=ft.AppView.WEB_BROWSER,
+            port=int(os.environ.get("PORT", "8550")),
+        )
+    else:
+        # デスクトップモード（従来通り）
+        ft.run(main)
