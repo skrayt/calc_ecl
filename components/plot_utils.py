@@ -42,9 +42,20 @@ _jp_font_candidates = [
 ]
 _available_fonts = _get_available_fonts(_jp_font_candidates)
 
-# フォントキャッシュに日本語フォントが見つからない場合、キャッシュを再構築して再試行する
+# フォントキャッシュに日本語フォントが見つからない場合、システムフォントを直接スキャンして追加する
+# （Linux/Render環境でfontManager.rebuild()は存在しないため、addfont()を使用）
 if not _available_fonts:
-    _fm.fontManager.rebuild()
+    import glob as _glob
+    _font_search_dirs = ["/usr/share/fonts", "/usr/local/share/fonts"]
+    for _font_dir in _font_search_dirs:
+        for _font_path in (
+            _glob.glob(f"{_font_dir}/**/*.otf", recursive=True)
+            + _glob.glob(f"{_font_dir}/**/*.ttf", recursive=True)
+        ):
+            try:
+                _fm.fontManager.addfont(_font_path)
+            except Exception:
+                pass
     _available_fonts = _get_available_fonts(_jp_font_candidates)
 
 _available_fonts = _available_fonts + ["Arial"]
