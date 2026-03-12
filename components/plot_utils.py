@@ -29,6 +29,10 @@ def _get_available_fonts(candidates: list[str]) -> list[str]:
     return [f for f in candidates if f in registered]
 
 _jp_font_candidates = [
+    "Noto Sans CJK JP",          # Linux（Render/Ubuntu: fonts-noto-cjk）
+    "Noto Sans CJK SC",          # Linux（Noto CJK 代替名）
+    "Noto Sans JP",              # Linux（Noto Sans JP）
+    "NotoSansCJK-Regular",       # Linux（ファイル名由来）
     "Yu Gothic",                 # Windows（WinPython標準）
     "Meiryo",                    # Windows
     "MS Gothic",                 # Windows（フォールバック）
@@ -36,7 +40,14 @@ _jp_font_candidates = [
     "Hiragino Sans",             # macOS新
     "Hiragino Maru Gothic Pro",  # macOS旧
 ]
-_available_fonts = _get_available_fonts(_jp_font_candidates) + ["Arial"]
+_available_fonts = _get_available_fonts(_jp_font_candidates)
+
+# フォントキャッシュに日本語フォントが見つからない場合、キャッシュを再構築して再試行する
+if not _available_fonts:
+    _fm.fontManager.rebuild()
+    _available_fonts = _get_available_fonts(_jp_font_candidates)
+
+_available_fonts = _available_fonts + ["Arial"]
 
 # seabornの設定（先に行う。set_styleはrcParamsを上書きするためフォント設定より前に実行する）
 sns.set_style("whitegrid")
