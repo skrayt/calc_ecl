@@ -168,17 +168,26 @@ def data_view_page(page: ft.Page) -> ft.Control:
                 load_datasets_list()
             page.update()
 
-        def start_import_thread(file_path, fiscal_year_month):
-            """インポートをバックグラウンドスレッドで実行する"""
+        def start_import_thread(file_path, fiscal_year_month, csv_content=None):
+            """インポートをバックグラウンドスレッドで実行する
+            file_path: デスクトップ時のCSVパス（Webではcsvcontentを使用）
+            csv_content: Web時のCSV文字列
+            """
             def run():
                 try:
                     import pandas as _pd
+                    import io as _io
                     # 1. CSV読み込みとヘッダー取得
-                    csv_df = _pd.read_csv(file_path, encoding="utf-8", dtype=str, nrows=0)
+                    if csv_content is not None:
+                        csv_df = _pd.read_csv(_io.StringIO(csv_content), dtype=str, nrows=0)
+                    else:
+                        csv_df = _pd.read_csv(file_path, encoding="utf-8", dtype=str, nrows=0)
                     csv_columns = list(csv_df.columns)
 
                     # 2. 未知カラム検出
-                    unknowns = detect_unknown_columns(file_path, csv_columns)
+                    unknowns = detect_unknown_columns(
+                        csv_path=file_path, csv_columns=csv_columns, csv_content=csv_content
+                    )
 
                     # 3. 未知カラムがあれば一括ダイアログ表示
                     if unknowns:
@@ -268,23 +277,65 @@ def data_view_page(page: ft.Page) -> ft.Control:
                         page.update()
 
                     res = import_csv_gui(
-                        file_path, date.today(), fiscal_year_month,
-                        progress_callback=prog,
+                        csv_path=file_path, retrieved_at=date.today(),
+                        fiscal_year_month=fiscal_year_month,
+                        progress_callback=prog, csv_content=csv_content,
                     )
                     on_import_result(res)
                 except Exception as ex:
                     on_import_result({"error": str(ex)})
             threading.Thread(target=run, daemon=True).start()
 
+        # Web時のCSVペースト用ダイアログ
+        web_csv_area = ft.TextField(
+            label="CSVの内容をここにペースト",
+            multiline=True, min_lines=10, max_lines=20,
+            expand=True, text_size=11,
+        )
+
+        def on_web_csv_submit(e):
+            content = web_csv_area.value.strip()
+            if not content:
+                return
+            page.pop_dialog()
+            fiscal_ym = _get_fiscal_year_month()
+            progress_bar.visible = True
+            progress_bar.value = 0
+            import_status.value = "準備中..."
+            page.update()
+            start_import_thread(None, fiscal_ym, csv_content=content)
+
+        web_csv_dialog = ft.AlertDialog(
+            title=ft.Text("CSVをペースト（説明変数）"),
+            content=ft.Container(
+                content=ft.Column([
+                    ft.Text("CSVファイルの内容をコピーしてここにペーストしてください。", size=12),
+                    web_csv_area,
+                ], spacing=8),
+                width=600, height=350,
+            ),
+            actions=[
+                ft.TextButton("キャンセル", on_click=lambda e: page.pop_dialog()),
+                ft.ElevatedButton("インポート実行", on_click=on_web_csv_submit),
+            ],
+        )
+
         async def pick_csv(e):
-            files = await file_picker.pick_files(allow_multiple=False, allowed_extensions=["csv"])
-            if files and files[0].path:
-                fiscal_ym = _get_fiscal_year_month()
-                progress_bar.visible = True
-                progress_bar.value = 0
-                import_status.value = "準備中..."
+            if page.web:
+                # Web: テキストエリアにCSVをペーストして入力
+                web_csv_area.value = ""
+                page.show_dialog(web_csv_dialog)
                 page.update()
-                start_import_thread(files[0].path, fiscal_ym)
+            else:
+                # デスクトップ: 従来のファイルピッカー
+                files = await file_picker.pick_files(allow_multiple=False, allowed_extensions=["csv"])
+                if files and files[0].path:
+                    fiscal_ym = _get_fiscal_year_month()
+                    progress_bar.visible = True
+                    progress_bar.value = 0
+                    import_status.value = "準備中..."
+                    page.update()
+                    start_import_thread(files[0].path, fiscal_ym)
 
         file_picker = ft.FilePicker()
 
@@ -633,14 +684,21 @@ def data_view_page(page: ft.Page) -> ft.Control:
                 load_target_datasets_list()
             page.update()
 
-        def start_target_import_thread(file_path, dataset_name, target_type, unit):
+        def start_target_import_thread(file_path, dataset_name, target_type, unit,
+                                        csv_content=None):
             def run():
                 try:
                     # CSVを読み込んで目的変数列を確認
                     import csv
-                    with open(file_path, encoding="utf-8") as f:
-                        reader = csv.reader(f)
-                        headers = next(reader)
+                    import io as _io
+                    if csv_content is not None:
+                        reader = csv.reader(_io.StringIO(csv_content))
+                    else:
+                        _f = open(file_path, encoding="utf-8")
+                        reader = csv.reader(_f)
+                    headers = next(reader)
+                    if csv_content is None:
+                        _f.close()
                     fixed = {"時点", "セグメントコード", "セグメント名"}
                     target_cols = [h for h in headers if h not in fixed]
 
@@ -688,13 +746,14 @@ def data_view_page(page: ft.Page) -> ft.Control:
                         page.update()
 
                     res = import_target_csv_gui(
-                        file_path,
-                        date.today(),
-                        dataset_name,
-                        target_type,
+                        csv_path=file_path,
+                        retrieved_at=date.today(),
+                        dataset_name=dataset_name,
+                        target_type=target_type,
                         target_names=target_names if target_names else None,
                         unit=unit,
                         progress_callback=prog,
+                        csv_content=csv_content,
                     )
                     on_t_import_result(res)
                 except Exception as ex:
@@ -702,17 +761,59 @@ def data_view_page(page: ft.Page) -> ft.Control:
 
             threading.Thread(target=run, daemon=True).start()
 
+        # Web時の目的変数CSVペースト用ダイアログ
+        web_target_csv_area = ft.TextField(
+            label="目的変数CSVの内容をここにペースト",
+            multiline=True, min_lines=10, max_lines=20,
+            expand=True, text_size=11,
+        )
+
+        def on_web_target_csv_submit(e):
+            content = web_target_csv_area.value.strip()
+            if not content:
+                return
+            page.pop_dialog()
+            ds_name = t_dataset_name_input.value or f"{date.today().strftime('%Y年%m月')} {t_type_dropdown.value.upper()}実績"
+            t_progress_bar.visible = True
+            t_progress_bar.value = 0
+            t_import_status.value = "準備中..."
+            page.update()
+            start_target_import_thread(
+                None, ds_name, t_type_dropdown.value, t_unit_input.value,
+                csv_content=content,
+            )
+
+        web_target_csv_dialog = ft.AlertDialog(
+            title=ft.Text("CSVをペースト（目的変数）"),
+            content=ft.Container(
+                content=ft.Column([
+                    ft.Text("CSVファイルの内容をコピーしてここにペーストしてください。", size=12),
+                    web_target_csv_area,
+                ], spacing=8),
+                width=600, height=350,
+            ),
+            actions=[
+                ft.TextButton("キャンセル", on_click=lambda e: page.pop_dialog()),
+                ft.ElevatedButton("インポート実行", on_click=on_web_target_csv_submit),
+            ],
+        )
+
         async def pick_target_csv(e):
-            files = await t_file_picker.pick_files(allow_multiple=False, allowed_extensions=["csv"])
-            if files and files[0].path:
-                ds_name = t_dataset_name_input.value or f"{date.today().strftime('%Y年%m月')} {t_type_dropdown.value.upper()}実績"
-                t_progress_bar.visible = True
-                t_progress_bar.value = 0
-                t_import_status.value = "準備中..."
+            if page.web:
+                web_target_csv_area.value = ""
+                page.show_dialog(web_target_csv_dialog)
                 page.update()
-                start_target_import_thread(
-                    files[0].path, ds_name, t_type_dropdown.value, t_unit_input.value
-                )
+            else:
+                files = await t_file_picker.pick_files(allow_multiple=False, allowed_extensions=["csv"])
+                if files and files[0].path:
+                    ds_name = t_dataset_name_input.value or f"{date.today().strftime('%Y年%m月')} {t_type_dropdown.value.upper()}実績"
+                    t_progress_bar.visible = True
+                    t_progress_bar.value = 0
+                    t_import_status.value = "準備中..."
+                    page.update()
+                    start_target_import_thread(
+                        files[0].path, ds_name, t_type_dropdown.value, t_unit_input.value
+                    )
 
         t_file_picker = ft.FilePicker()
 

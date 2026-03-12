@@ -66,14 +66,22 @@ def detect_indicator_name(col_name: str) -> str:
     return re.sub(r"【.+?】", "", col_name).strip()
 
 
-def detect_frequency_from_csv(csv_path: str, col_index: int) -> str:
+def detect_frequency_from_csv(csv_path: str = None, col_index: int = 0,
+                               csv_content: str = None) -> str:
     """CSVデータをスキャンして、指定カラムに値がある行の時系列粒度を推定する。
-    最も細かい粒度（月次＞四半期＞暦年＞年度）を代表粒度とする。"""
+    最も細かい粒度（月次＞四半期＞暦年＞年度）を代表粒度とする。
+    csv_path または csv_content のいずれかを指定する。"""
     import csv as csv_mod
+    import io
     freq_priority = {"monthly": 0, "quarterly": 1, "calendar_year": 2, "fiscal_year": 3}
     best_freq = None
 
-    with open(csv_path, encoding="utf-8") as f:
+    if csv_content is not None:
+        f = io.StringIO(csv_content)
+    else:
+        f = open(csv_path, encoding="utf-8")
+
+    try:
         reader = csv_mod.reader(f)
         next(reader)  # ヘッダースキップ
         for row in reader:
@@ -86,12 +94,16 @@ def detect_frequency_from_csv(csv_path: str, col_index: int) -> str:
             _, freq = parsed
             if best_freq is None or freq_priority.get(freq, 99) < freq_priority.get(best_freq, 99):
                 best_freq = freq
+    finally:
+        f.close()
 
     return best_freq or "monthly"
 
 
-def detect_unknown_columns(csv_path: str, csv_columns: list[str]) -> list[tuple[str, int, dict]]:
+def detect_unknown_columns(csv_path: str = None, csv_columns: list[str] = None,
+                            csv_content: str = None) -> list[tuple[str, int, dict]]:
     """未知のカラムを検出し、自動検出情報とともに返す。
+    csv_path または csv_content のいずれかを指定する。
 
     Returns
     -------
@@ -113,7 +125,7 @@ def detect_unknown_columns(csv_path: str, csv_columns: list[str]) -> list[tuple[
             "name": detect_indicator_name(col),
             "base_year": detect_base_year(col),
             "unit": detect_unit(col),
-            "frequency": detect_frequency_from_csv(csv_path, col_index),
+            "frequency": detect_frequency_from_csv(csv_path, col_index, csv_content=csv_content),
         }
         unknowns.append((col, col_index, auto_info))
 
@@ -372,22 +384,29 @@ def ensure_indicator_definitions(cur, source_id: int, column_mapping: dict):
 # =========================================================
 # CSVパース & インポート
 # =========================================================
-def import_csv_gui(csv_path: str, retrieved_at: date, fiscal_year_month: date,
-                   progress_callback=None):
+def import_csv_gui(csv_path: str = None, retrieved_at: date = None,
+                   fiscal_year_month: date = None,
+                   progress_callback=None, csv_content: str = None):
     """GUI経由のインポート実行
 
     Parameters
     ----------
-    csv_path : str
-        CSVファイルパス
+    csv_path : str, optional
+        CSVファイルパス（デスクトップ時）
     retrieved_at : date
         データ取得日（通常は今日）
     fiscal_year_month : date
         決算年月（月初日で指定。例: 2026-03-01 = 2026年3月期）
     progress_callback : callable, optional
         進捗コールバック (current, total)
+    csv_content : str, optional
+        CSV文字列（Web時。csv_pathの代わりに使用）
     """
-    df = pd.read_csv(csv_path, encoding="utf-8", dtype=str)
+    import io
+    if csv_content is not None:
+        df = pd.read_csv(io.StringIO(csv_content), dtype=str)
+    else:
+        df = pd.read_csv(csv_path, encoding="utf-8", dtype=str)
 
     # マッピング読み込み（未知カラムの解決はUI側で事前に完了済み）
     mapping = load_mapping()

@@ -151,32 +151,38 @@ def create_target_dataset(
 # CSVインポート
 # =========================================================
 def import_target_csv_gui(
-    csv_path: str,
-    retrieved_at: date,
-    dataset_name: str,
-    target_type: str,
+    csv_path: str = None,
+    retrieved_at: date = None,
+    dataset_name: str = None,
+    target_type: str = None,
     target_names: dict[str, str] | None = None,
     unit: str | None = None,
     progress_callback=None,
+    csv_content: str = None,
 ):
     """GUI経由の目的変数CSVインポート。
 
     Args:
-        csv_path: CSVファイルパス
+        csv_path: CSVファイルパス（デスクトップ時）
         retrieved_at: データ取得日
         dataset_name: データセット名
         target_type: 目的変数タイプ (pd / lgd / ead)
         target_names: {target_code: 日本語名} の辞書
         unit: 単位
         progress_callback: (current, total) を受け取るコールバック
+        csv_content: CSV文字列（Web時。csv_pathの代わりに使用）
 
     Returns:
         {"inserted": int, "skipped": int, "target_dataset_id": int}
     """
+    import io
     if target_type not in VALID_TARGET_TYPES:
         raise ValueError(f"無効な目的変数タイプ: {target_type}（有効値: {VALID_TARGET_TYPES}）")
 
-    df = pd.read_csv(csv_path, encoding="utf-8", dtype=str)
+    if csv_content is not None:
+        df = pd.read_csv(io.StringIO(csv_content), dtype=str)
+    else:
+        df = pd.read_csv(csv_path, encoding="utf-8", dtype=str)
     col_info = identify_columns(df)
     frequency = detect_frequency_from_data(df)
 
