@@ -1,0 +1,14 @@
+.git
+.gitignore
+.DS_Store
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+config/db.ini
+docs/
+indicator/
+target_data/
+render.yaml
+.python-version

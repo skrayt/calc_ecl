@@ -38,11 +38,35 @@ IFRS9/ECLモデルの将来予想に必要な統計分析機能をFlet GUIアプ
 | **Phase W1** | **DB接続二重化（環境変数フォールバック）** | **完了** |
 | **Phase W2** | **main.py Web/デスクトップ切替** | **完了** |
 | **Phase W3** | **Supabase DBセットアップ（手動作業）** | **完了** |
-| **Phase W4** | **Renderデプロイ設定** | **完了** |
+| **Phase W4** | **Renderデプロイ設定・デプロイ成功** | **完了** |
+| **Phase W4b** | **Renderから Google Cloud Run へ移行（EdgeブラウザのSSL問題回避）** | **完了** |
 | **Phase W5** | **FilePickerのWeb対応** | **未着手** |
 | **Phase W6** | **ドキュメント更新（Web公開対応）** | **未着手** |
 
-**実装順序: Phase 6A → 6B → 6C → 6D → 6E → 6F → Phase 5 → Phase 7A → 7B → 7C → 7D → 7E → 7F → Phase W1 → W2 → W3 → W4 → W5 → W6**
+**実装順序: Phase 6A → 6B → 6C → 6D → 6E → 6F → Phase 5 → Phase 7A → 7B → 7C → 7D → 7E → 7F → Phase W1 → W2 → W3 → W4 → W4b → W5 → W6**
+
+### Phase W4b: Google Cloud Run 移行（2026-03-12）
+
+**背景:** RenderデプロイはMacのBrave/Chrome/Safariからは正常アクセスできたが、
+WindowsのEdgeブラウザ（会社PC・モバイルルーター双方）で証明書エラーが発生。
+`onrender.com` ドメインがEdgeのSmartScreenにより遮断されていたと推定。
+
+**対応:** Google Cloud Run（`*.run.app` ドメイン）に移行。
+
+**公開URL:** https://calc-ecl-610737115709.asia-northeast1.run.app
+
+**構成:**
+- ホスティング: Google Cloud Run（asia-northeast1リージョン、無料枠）
+- DB: Supabase（変更なし）
+- Dockerfile新規作成（python:3.12-slim + fonts-noto-cjk）
+- 環境変数: Cloud Runコンソールで設定（DATABASE_URL / DB_SCHEMA / DB_SSLMODE / FLET_WEB）
+
+**スクリーンショット:**
+- `25_cloudrun_deploy_confirm.png` — Cloud Shellでのデプロイ実行（認証確認）
+- `26_cloudrun_deploy_success.png` — デプロイ成功・Service URL発行
+- `27_cloudrun_db_error.png` — 初回アクセス時のDB接続エラー（環境変数未設定）
+- `28_cloudrun_env_check.png` — Cloud Shellでの環境変数確認
+- `29_cloudrun_env_set_success.png` — Cloud ConsoleでのGUI環境変数設定・再デプロイ成功
 
 ---
 
