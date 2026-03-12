@@ -48,7 +48,9 @@ _available_fonts = _get_available_fonts(_jp_font_candidates)
 
 # japanize_matplotlibのフォントファイルを直接パスで登録する
 # Python 3.12では distutils が削除されたため import japanize_matplotlib は失敗するが、
-# パッケージインストール時にコピーされたフォントファイル（ipaexg.ttf）は利用可能
+# pip install で配置された ipaexg.ttf は利用可能。
+# フォントファミリー名はファイルから取得し候補名の不一致を回避する。
+_extra_font_family = None
 if not _available_fonts:
     try:
         import importlib.util as _ilu
@@ -57,8 +59,12 @@ if not _available_fonts:
         if _spec and _spec.origin:
             _font_path = _pl.Path(_spec.origin).parent / "fonts" / "ipaexg.ttf"
             if _font_path.exists():
+                _before = {f.name for f in _fm.fontManager.ttflist}
                 _fm.fontManager.addfont(str(_font_path))
-                _available_fonts = _get_available_fonts(_jp_font_candidates)
+                _after = {f.name for f in _fm.fontManager.ttflist}
+                _new = _after - _before
+                if _new:
+                    _extra_font_family = next(iter(_new))  # 実際に登録されたフォント名を使用
     except Exception:
         pass
 
@@ -67,8 +73,9 @@ sns.set_style("whitegrid")
 
 # フォント設定はset_styleの後に行う（set_styleによる上書きを防ぐため）
 # 日本語フォントが見つかった場合はfont.familyに直接指定する（sans-serif経由だと上書きされる問題を回避）
-if _available_fonts:
-    plt.rcParams["font.family"] = _available_fonts[0]
+_jp_font = _available_fonts[0] if _available_fonts else _extra_font_family
+if _jp_font:
+    plt.rcParams["font.family"] = _jp_font
 else:
     plt.rcParams["font.family"] = "sans-serif"
     plt.rcParams["font.sans-serif"] = ["DejaVu Sans"]
